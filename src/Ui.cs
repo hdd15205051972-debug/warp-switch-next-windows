@@ -145,6 +145,8 @@ namespace WarpSwitchNext
     sealed class StatusRing : Control
     {
         static Bitmap picture;
+        /// <summary>Set if the picture could not be drawn; the circle then shows plain colour.</summary>
+        public static Exception LastError;
         readonly Timer spin = new Timer { Interval = 33 };
         float angle;
         Color tint = Palette.Gray;
@@ -197,18 +199,31 @@ namespace WarpSwitchNext
             float stroke = Math.Max(2f, s * 0.03f);
             var outer = new RectangleF((Width - s) / 2 + stroke, (Height - s) / 2 + stroke, s - stroke * 2, s - stroke * 2);
 
-            // The picture, cropped to a circle inside the ring (overscanned so the icon's own edge never shows).
-            if (picture == null) picture = Ui.AppImage(256);
-            var inner = RectangleF.Inflate(outer, -stroke * 1.4f, -stroke * 1.4f);
-            var dest = RectangleF.Inflate(inner, inner.Width * 0.07f, inner.Height * 0.07f);
-            using (var attrs = Look(off, busy))
-            using (var brush = attrs == null
-                ? new TextureBrush(picture, WrapMode.Clamp)
-                : new TextureBrush(picture, new Rectangle(0, 0, picture.Width, picture.Height), attrs))
+            // The picture, cropped to the circle (overscanned so the icon's own edge never shows).
+            // The ring drawn on top hides the clip edge. A drawing failure must never break the window.
+            if (picture == null && LastError == null)
             {
-                brush.WrapMode = WrapMode.Clamp;
-                brush.Transform = new Matrix(dest.Width / picture.Width, 0, 0, dest.Height / picture.Height, dest.X, dest.Y);
-                g.FillEllipse(brush, inner);
+                try { picture = Ui.AppImage(256); } catch (Exception ex) { LastError = ex; }
+            }
+            if (picture != null)
+            {
+                var dest = Rectangle.Round(RectangleF.Inflate(outer, outer.Width * 0.06f, outer.Height * 0.06f));
+                var saved = g.Save();
+                try
+                {
+                    using (var clip = new GraphicsPath()) { clip.AddEllipse(outer); g.SetClip(clip); }
+                    using (var attrs = Look(off, busy))
+                    {
+                        if (attrs == null) g.DrawImage(picture, dest);
+                        else g.DrawImage(picture, dest, 0, 0, picture.Width, picture.Height, GraphicsUnit.Pixel, attrs);
+                    }
+                }
+                catch (Exception ex) { LastError = ex; }
+                finally { g.Restore(saved); }
+            }
+            else
+            {
+                using (var fill = new SolidBrush(Color.FromArgb(26, tint))) g.FillEllipse(fill, outer);
             }
 
             using (var ring = new Pen(Color.FromArgb(busy ? 70 : 255, tint), stroke)) g.DrawEllipse(ring, outer);

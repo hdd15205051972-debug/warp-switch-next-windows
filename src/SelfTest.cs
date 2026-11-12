@@ -257,6 +257,9 @@ namespace WarpSwitchNext
         public static int Screenshots(string folder, string outFile)
         {
             var r = new Report(outFile);
+            // Report drawing errors instead of showing an error dialog that nobody can close.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) => r.Check(false, "UI error: " + e.Exception);
             folder = folder ?? "screenshots";
             Directory.CreateDirectory(folder);
             var data = Path.Combine(Path.GetTempPath(), "warp-switch-ui-" + Guid.NewGuid().ToString("N"));
@@ -305,6 +308,7 @@ namespace WarpSwitchNext
                         }
                         tray.Save(Path.Combine(folder, "7-tray-icons.png"), ImageFormat.Png);
                     }
+                    r.Check(StatusRing.LastError == null, "status picture drawn without errors" + (StatusRing.LastError == null ? "" : ": " + StatusRing.LastError));
                     form.Hide();
                 }
             }
