@@ -46,6 +46,17 @@ jobs:
           Get-Content screenshots.txt
           exit $p.ExitCode
 
+      - name: Screenshots (custom icon build)
+        run: |
+          dotnet build src/WarpSwitchNext.csproj -c Release -o build/app-custom -p:CustomIcon=true --no-incremental --nologo
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType Directory -Force 'build/custom-test/core' | Out-Null
+          Copy-Item 'build/app-custom/WarpSwitchNext.exe' 'build/custom-test'
+          Copy-Item 'build/core/*.exe' 'build/custom-test/core'
+          $p = Start-Process -FilePath (Resolve-Path 'build/custom-test/WarpSwitchNext.exe') -ArgumentList '--screenshots', "$PWD\screenshots-custom", '--out', "$PWD\screenshots-custom.txt" -Wait -PassThru
+          Get-Content screenshots-custom.txt
+          exit $p.ExitCode
+
       - name: Real WARP connection test
         id: connect
         continue-on-error: true
@@ -88,4 +99,6 @@ jobs:
             screenshots.txt
             connecttest.txt
             screenshots/
+            screenshots-custom.txt
+            screenshots-custom/
             connect-logs/

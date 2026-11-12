@@ -61,6 +61,16 @@ cd warp-switch-next-windows
 
 构建脚本从 usque 官方 GitHub Release 下载固定版本的 x64、ARM64 和 32 位程序，核验固定的 SHA-256，再编译。输出为 `dist/WARP 新开关/` 和 zip 安装包。依赖二进制不存放在源码仓库。
 
+### 换成自己的图标
+
+准备一个 `.ico` 文件（建议包含 16～256 像素各尺寸），这样编译：
+
+```powershell
+dotnet build src/WarpSwitchNext.csproj -c Release -o build/app -p:CustomIcon=true -p:AppIconFile=C:\path\to\icon.ico
+```
+
+程序文件、窗口、任务栏都会用这个图标；通知区域图标是它加右下角一个表示状态的小圆点（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。把 `build/app/WarpSwitchNext.exe` 换进程序文件夹即可。
+
 ## 测试
 
 每次推送都会在 GitHub 的 Windows 电脑上自动编译并运行下面的测试。`main` 分支出现新版本号时，全部测试通过后自动发布 Release。

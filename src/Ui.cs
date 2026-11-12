@@ -113,7 +113,11 @@ namespace WarpSwitchNext
 
         static readonly Dictionary<string, Icon> trayIcons = new Dictionary<string, Icon>();
 
-        /// <summary>Small tray icon: a shield coloured by connection state, with a check when connected.</summary>
+        /// <summary>
+        /// Small tray icon showing the connection state. Default builds: a shield coloured by state,
+        /// with a check when connected. Builds with a custom app icon (CustomIcon=true): that icon
+        /// with a small coloured dot in the corner.
+        /// </summary>
         public static Icon TrayIcon(string phase)
         {
             var key = phase == "on" ? "on" : phase == "error" ? "error" : phase == "off" ? "off" : "busy";
@@ -124,8 +128,17 @@ namespace WarpSwitchNext
                 using (var g = Graphics.FromImage(bmp))
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                    var box = new RectangleF(size * 0.06f, size * 0.03f, size * 0.88f, size * 0.94f);
                     var color = key == "on" ? Palette.Green : key == "error" ? Palette.Orange : key == "off" ? Palette.Gray : Palette.Blue;
+#if CUSTOM_ICON
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    using (var picture = AppImage(size)) g.DrawImage(picture, new Rectangle(0, 0, size, size));
+                    float d = size * 0.5f;
+                    var dot = new RectangleF(size - d, size - d, d - 0.5f, d - 0.5f);
+                    using (var ring = new SolidBrush(Color.White)) g.FillEllipse(ring, dot);
+                    float edge = Math.Max(1.2f, size * 0.07f);
+                    using (var fill = new SolidBrush(color)) g.FillEllipse(fill, RectangleF.Inflate(dot, -edge, -edge));
+#else
+                    var box = new RectangleF(size * 0.06f, size * 0.03f, size * 0.88f, size * 0.94f);
                     using (var shield = Shield(box))
                     using (var brush = new SolidBrush(color)) g.FillPath(brush, shield);
                     if (key == "on")
@@ -134,6 +147,7 @@ namespace WarpSwitchNext
                         using (var pen = new Pen(Color.White, Math.Max(1.6f, width)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
                             g.DrawLines(pen, points);
                     }
+#endif
                 }
                 IntPtr handle = bmp.GetHicon();
                 var icon = (Icon)Icon.FromHandle(handle).Clone();
