@@ -8,7 +8,7 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 
 ## 下载和安装
 
-从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-1.0.1.zip`。
+从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-1.0.2.zip`。
 
 1. 解压，把「WARP 新开关」文件夹放到一个固定的位置（例如「文档」或 `D:\Apps`）。打开开机自动连接后不要再移动它。
 2. 双击 `WARP 新开关.exe`。程序没有代码签名，Windows 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
@@ -19,8 +19,8 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 
 - **开启 / 关闭**：验证实际 WARP 流量成功后才启用系统代理；关闭时恢复原来的代理设置。
 - **换入口重试**：跳过上次成功的入口，重新尝试其他候选入口。
-- **修改伪装域名**：点「伪装域名」一行的「修改」；默认 `www.bing.com`。SNI 改变不会把 Cloudflare 的入口 IP 变成另一家网站的 IP。
-- **连接模式**：「自动尝试」先用 TLS ClientHello 记录分片，再尝试不分片的兼容模式；也可手动固定其中一种。
+- **修改伪装域名**：点「伪装域名」一行的「修改」；默认 `www.bing.com`。连接中也可以改，保存后自动用新域名重新连接；中文输入法打出的全角字符和「。」会自动纠正。SNI 改变不会把 Cloudflare 的入口 IP 变成另一家网站的 IP。
+- **连接模式**：「自动尝试」先用 TLS ClientHello 记录分片，再尝试不分片的兼容模式；也可手动固定其中一种。连接中修改会自动重新连接。
 - **开机时自动连接**：打开后，登录 Windows 时程序在任务栏通知区域（右下角）后台启动，等网络就绪后自动连接。电脑睡眠唤醒或网络恢复时，如果连接已经中断，也会自动重新连接；连接失败会隔一段时间（30 秒起，最长 5 分钟）再试。手动点「关闭」后不会自动重连，直到你再次开启。
 - **通知区域图标**：程序图标右下角的小圆点表示状态（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。关掉窗口后程序仍在后台运行，点图标可重新打开窗口；「退出」会先关闭连接并恢复代理。
 - **打开日志**：打开数据文件夹，里面的 `worker.log`、`connection.log` 记录了连接过程。
@@ -76,6 +76,7 @@ dotnet build src/WarpSwitchNext.csproj -c Release -o build/app -p:AppIconFile=C:
 每次推送都会在 GitHub 的 Windows 电脑上自动编译并运行下面的测试。`main` 分支出现新版本号时，全部测试通过后自动发布 Release。
 
 - `--self-test`：TLS 分片与重组、部分读取与尾随记录、域名校验、代理规则、设置和账号文件（不改动电脑任何设置，可在本机运行）。
+- `--edit-test`：在各种连接状态下修改伪装域名和连接模式。
 - `--proxy-test`：设置并恢复系统代理，包括自动检测、设置脚本、已有其他代理、连接期间用户改动、崩溃后恢复等情况。
 - `--screenshots`：渲染窗口在各状态下的截图。
 - `--connect-test`：真实注册 WARP 账号，用两种连接模式分别连通，再通过系统代理访问网页并验证经过 WARP，最后确认代理已恢复。

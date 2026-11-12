@@ -118,10 +118,36 @@ namespace WarpSwitchNext
             if (Working) Stop(() => Start(true)); else Start(true);
         }
 
+        /// <summary>
+        /// Applies a changed connection setting. While connecting or connected, reconnects with it right
+        /// away; otherwise the setting stays locked behind a connection that may never succeed with it.
+        /// </summary>
+        void ReconnectForNewSetting()
+        {
+            if (!Working || Registering) return; // registration finishes and then connects with the new setting
+            UserStopped = false;
+            retryTimer.Stop();
+            Stop(() => Start());
+        }
+
         public void SetMode(string mode)
         {
-            if (Working) return;
-            Settings.Mode = mode; SaveSettings(); Notify();
+            if (mode == Settings.Mode) return;
+            Settings.Mode = mode; SaveSettings();
+            ReconnectForNewSetting();
+            Notify();
+        }
+
+        /// <summary>Saves a new 伪装域名. Returns null when saved, or a message explaining what is wrong.</summary>
+        public string ApplyDomain(string input)
+        {
+            var value = Util.NormalizeDomain(input);
+            if (!Util.ValidDomain(value)) return "“" + (input ?? "").Trim() + "”不是有效的域名。请用英文输入法输入，例如 www.bing.com";
+            if (value == Settings.Sni) return null;
+            Settings.Sni = value; SaveSettings();
+            ReconnectForNewSetting();
+            Notify();
+            return null;
         }
 
         public void SetAutoConnect(bool on)
@@ -141,16 +167,16 @@ namespace WarpSwitchNext
 
         public void EditDomain(IWin32Window owner)
         {
-            if (Working) return;
-            var value = Dialogs.AskDomain(owner, Settings.Sni);
-            if (value == null) return;
-            value = value.Trim().ToLowerInvariant();
-            if (!Util.ValidDomain(value))
+            var text = Settings.Sni;
+            while (true)
             {
-                MessageBox.Show(owner, "域名格式不正确，例如 www.bing.com", "WARP 新开关", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                text = Dialogs.AskDomain(owner, text, connected: Working && !Registering);
+                if (text == null) return; // cancelled
+                var problem = ApplyDomain(text);
+                if (problem == null) return;
+                MessageBox.Show(owner, problem, "WARP 新开关", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Reopen with what they typed, so a small mistake doesn't mean starting over.
             }
-            Settings.Sni = value; SaveSettings(); Notify();
         }
 
         public void Start(bool fresh = false)

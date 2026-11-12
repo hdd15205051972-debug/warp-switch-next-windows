@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-$Version = '1.0.1'
+$Version = '1.0.2'
 $AppName = 'WARP 新开关'
 
 if (-not (Test-Path 'build/core/usque-amd64.exe')) { & ./fetch-usque.ps1 }

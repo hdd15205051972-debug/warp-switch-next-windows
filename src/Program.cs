@@ -23,6 +23,12 @@ namespace WarpSwitchNext
             if (args.Contains("--self-test")) return SelfTest.Units(Option("--out"));
             if (args.Contains("--proxy-test")) return SelfTest.Proxy(Option("--out"));
             if (args.Contains("--connect-test")) return SelfTest.Connect(Option("--data"), Option("--out"));
+            if (args.Contains("--edit-test"))
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                return SelfTest.Edit(Option("--out"));
+            }
             if (args.Contains("--screenshots"))
             {
                 Application.EnableVisualStyles();

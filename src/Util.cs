@@ -76,6 +76,23 @@ namespace WarpSwitchNext
 
         public static bool ValidDomain(string s) => s != null && s.Length <= 253 && Domain.IsMatch(s);
 
+        /// <summary>
+        /// Cleans up what people actually type or paste: full-width letters and dots from a Chinese
+        /// input method (ｄｏｃｋ．, 。), spaces, upper case, and a pasted web address (https://…/path).
+        /// </summary>
+        public static string NormalizeDomain(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return "";
+            var s = input.Normalize(NormalizationForm.FormKC); // full-width ASCII → ASCII, ｡ → 。
+            s = s.Replace('。', '.');                           // the Chinese full stop has no ASCII form
+            s = new string(s.Where(ch => !char.IsWhiteSpace(ch)).ToArray()).ToLowerInvariant();
+            foreach (var scheme in new[] { "https://", "http://" })
+                if (s.StartsWith(scheme)) s = s.Substring(scheme.Length);
+            int slash = s.IndexOfAny(new[] { '/', '?', '#' });
+            if (slash >= 0) s = s.Substring(0, slash);
+            return s.TrimEnd('.');
+        }
+
         public static string Quote(string arg) => "\"" + arg.Replace("\"", "\\\"") + "\"";
 
         public static void TryDelete(string path)

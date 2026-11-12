@@ -144,6 +144,11 @@ namespace WarpSwitchNext
             link.LinkClicked += (s, e) => action();
         }
 
+        // For the build's tests.
+        internal bool CanEditDomain => editLink.Enabled;
+        internal bool CanChangeMode => modeBox.Enabled;
+        internal string ShownDomain => sniValue.Text;
+
         public void RefreshView()
         {
             if (IsDisposed) return;
@@ -161,11 +166,11 @@ namespace WarpSwitchNext
             sniValue.Text = c.Settings.Sni;
             coloValue.Text = s.Colo;
             proxyValue.Text = Ports.ProxyAddress;
-            editLink.Enabled = !c.Working;
+            editLink.Enabled = !c.Stopping;
 
             int mode = Array.IndexOf(ModeKeys, c.Settings.Mode);
             modeBox.SelectedIndex = mode < 0 ? 0 : mode;
-            modeBox.Enabled = !c.Working;
+            modeBox.Enabled = !c.Stopping;
             autoSwitch.Checked = c.AutoConnect;
             autoSwitch.Enabled = !c.NeedsSetup;
 
@@ -190,7 +195,7 @@ namespace WarpSwitchNext
     static class Dialogs
     {
         /// <summary>Asks for a new 伪装域名; returns null when cancelled.</summary>
-        public static string AskDomain(IWin32Window owner, string current)
+        public static string AskDomain(IWin32Window owner, string current, bool connected)
         {
             using (var form = new Form())
             {
@@ -205,10 +210,12 @@ namespace WarpSwitchNext
                 form.Font = Ui.Font(9f);
                 var text = new Label
                 {
-                    Text = "这是连接时展示的 TLS 域名。它不会把入口 IP 变成该网站的 IP，也不能保证网络设备识别不到 WARP。修改后请重新连接。",
+                    Text = "这是连接时展示的 TLS 域名，例如 www.bing.com。它不会把入口 IP 变成该网站的 IP，也不能保证网络设备识别不到 WARP。"
+                         + (connected ? "保存后会自动用新域名重新连接。" : "下次连接时生效。"),
                     Bounds = new Rectangle(16, 14, 368, 56),
                 };
-                var box = new TextBox { Text = current, Bounds = new Rectangle(16, 78, 368, 26) };
+                // Domains are English letters: keep the Chinese input method off so "." stays "." (not "。").
+                var box = new TextBox { Text = current, Bounds = new Rectangle(16, 78, 368, 26), ImeMode = ImeMode.Disable };
                 var ok = new Button { Text = "保存", DialogResult = DialogResult.OK, Bounds = new Rectangle(208, 128, 84, 32) };
                 var cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Bounds = new Rectangle(300, 128, 84, 32) };
                 form.AcceptButton = ok; form.CancelButton = cancel;

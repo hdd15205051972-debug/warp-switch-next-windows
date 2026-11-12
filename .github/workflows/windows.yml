@@ -39,6 +39,13 @@ jobs:
           Get-Content proxytest.txt
           exit $p.ExitCode
 
+      - name: Settings test
+        run: |
+          $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList '--edit-test', '--out', "$PWD\edittest.txt" -Wait -PassThru
+          Get-Content edittest.txt
+          exit $p.ExitCode
+
       - name: Screenshots
         run: |
           $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
@@ -85,6 +92,7 @@ jobs:
           path: |
             selftest.txt
             proxytest.txt
+            edittest.txt
             screenshots.txt
             connecttest.txt
             screenshots/

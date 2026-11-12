@@ -73,6 +73,17 @@ namespace WarpSwitchNext
 
                 r.Check(Util.ValidDomain("www.bing.com") && Util.ValidDomain("dock.example.edu"), "valid domains accepted");
                 r.Check(!Util.ValidDomain("evil; command") && !Util.ValidDomain("https://example.com") && !Util.ValidDomain("bing") && !Util.ValidDomain(""), "invalid domains rejected");
+                var typed = new (string text, string expected)[]
+                {
+                    ("dock。schoology。com", "dock.schoology.com"),          // Chinese input method full stop
+                    ("ｄｏｃｋ．ｓｃｈｏｏｌｏｇｙ．ｃｏｍ", "dock.schoology.com"), // full-width letters and dot
+                    (" Dock.Schoology.com ", "dock.schoology.com"),
+                    ("https://dock.schoology.com/home?x=1", "dock.schoology.com"), // pasted web address
+                    ("www.bing.com.", "www.bing.com"),
+                };
+                foreach (var (text, expected) in typed)
+                    r.Check(Util.NormalizeDomain(text) == expected && Util.ValidDomain(Util.NormalizeDomain(text)), "typed “" + text + "” becomes " + expected);
+                r.Check(!Util.ValidDomain(Util.NormalizeDomain("dock schoology")) && !Util.ValidDomain(Util.NormalizeDomain("中文.com")), "text that isn't a domain is still rejected");
 
                 var merged = SystemProxy.MergeBypass("*.corp.example;LOCALHOST");
                 r.Check(merged.StartsWith("*.corp.example;LOCALHOST") && merged.Contains("192.168.*") && merged.Contains("172.31.*") && merged.Contains("<local>")
@@ -181,6 +192,61 @@ namespace WarpSwitchNext
             return r.Done("system proxy set, verified and restored");
         }
 
+        // ---------- Changing settings in every state (build machine only: creates a temporary app) ----------
+
+        public static int Edit(string outFile)
+        {
+            var r = new Report(outFile);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) => r.Check(false, "UI error: " + e.Exception);
+            var data = Path.Combine(Path.GetTempPath(), "warp-switch-edit-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(data);
+            try
+            {
+                var c = new AppController(data, Paths.Usque);
+                using (var form = new MainForm(c))
+                {
+                    var states = new (string name, string phase, bool working)[]
+                    {
+                        ("off", "off", false), ("connecting", "connecting", true), ("connected", "on", true),
+                        ("reconnecting", "reconnecting", true), ("failed, waiting to retry", "error", false),
+                    };
+                    foreach (var (name, phase, working) in states)
+                    {
+                        c.Preview(new StateInfo { Phase = phase }, needsSetup: false, working: working, autoConnect: true);
+                        r.Check(form.CanEditDomain && form.CanChangeMode, "伪装域名 and 连接模式 can be changed while " + name);
+                    }
+
+                    // Not connected: the new domain is saved and shown, nothing else happens.
+                    c.Preview(new StateInfo(), needsSetup: false, working: false, autoConnect: false);
+                    var problem = c.ApplyDomain("dock。schoology。com");
+                    var saved = Json.Read<Settings>(Path.Combine(data, "settings.json"));
+                    r.Check(problem == null && c.Settings.Sni == "dock.schoology.com" && saved?.Sni == "dock.schoology.com" && form.ShownDomain == "dock.schoology.com",
+                            "domain typed with the Chinese input method is saved as dock.schoology.com and shown");
+                    r.Check(!c.Stopping, "not connected: saving does not start or stop anything");
+
+                    // Connected: saving a new domain reconnects with it.
+                    c.Preview(new StateInfo { Phase = "on" }, needsSetup: false, working: true, autoConnect: true);
+                    problem = c.ApplyDomain("www.bing.com");
+                    r.Check(problem == null && c.Settings.Sni == "www.bing.com" && c.Stopping, "connected: saving a new domain closes the connection to reconnect with it");
+
+                    // Invalid input: explained, nothing changed.
+                    c.Preview(new StateInfo(), needsSetup: false, working: false, autoConnect: false);
+                    problem = c.ApplyDomain("学校网站");
+                    r.Check(problem != null && c.Settings.Sni == "www.bing.com", "invalid input is refused with a message: " + problem);
+
+                    // Same for the connection mode.
+                    c.Preview(new StateInfo { Phase = "on" }, needsSetup: false, working: true, autoConnect: true);
+                    c.Stopping = false;
+                    c.SetMode("compatible");
+                    r.Check(c.Settings.Mode == "compatible" && c.Stopping, "connected: changing 连接模式 reconnects with it");
+                }
+            }
+            catch (Exception e) { r.Check(false, "unexpected error: " + e); }
+            finally { try { Directory.Delete(data, true); } catch { } }
+            return r.Done("domain and mode can be changed in every state; connected changes reconnect");
+        }
+
         // ---------- Real connection: registers a WARP account and connects (build machine only) ----------
 
         public static int Connect(string dataDir, string outFile)
@@ -247,9 +313,36 @@ namespace WarpSwitchNext
                 const int mask = WinInet.Direct | WinInet.Proxy | WinInet.AutoProxyUrl | WinInet.AutoDetect;
                 r.Check((after.Flags & mask) == (before.Flags & mask) && after.Server == before.Server && !SystemProxy.IsOurs(after.Server),
                         "system proxy restored after closing: " + Describe(after));
+
+                // The app itself: connect, change 伪装域名 while connected, and it reconnects with the new one.
+                var c = new AppController(dataDir, usque);
+                c.Settings.Mode = "auto"; c.Settings.Sni = "www.bing.com";
+                bool Pump(Func<bool> done, int seconds)
+                {
+                    var until = DateTime.UtcNow.AddSeconds(seconds);
+                    while (DateTime.UtcNow < until) { Application.DoEvents(); if (done()) return true; Thread.Sleep(100); }
+                    return done();
+                }
+                string lastSeen = "";
+                c.Changed += () => { var line = "[" + c.State.Phase + "] " + c.State.Message; if (line != lastSeen) { lastSeen = line; r.Line("      " + line); } };
+                c.UserStart();
+                r.Check(Pump(() => c.State.Phase == "on", 240), "app connected with www.bing.com");
+                var problem = c.ApplyDomain("dock。schoology。com");
+                r.Check(problem == null && c.Settings.Sni == "dock.schoology.com", "changed 伪装域名 while connected (typed with a Chinese full stop)");
+                bool again = Pump(() => c.State.Phase == "on" && c.State.Sni == "dock.schoology.com" && !c.Stopping, 240);
+                r.Check(again, "reconnected by itself using dock.schoology.com (entry " + c.State.Endpoint + ")");
+                if (again)
+                {
+                    var t2 = ConnectionWorker.Trace(WebRequest.GetSystemWebProxy());
+                    r.Check(t2.TryGetValue("warp", out var w2) && (w2 == "on" || w2 == "plus"), "traffic still goes through WARP after the change (warp=" + (w2 ?? "?") + ")");
+                }
+                c.UserStop();
+                r.Check(Pump(() => !c.Working, 30), "closed");
+                var end = WinInet.Query();
+                r.Check(!((end.Flags & WinInet.Proxy) != 0 && SystemProxy.IsOurs(end.Server)), "system proxy restored at the end: " + Describe(end));
             }
             catch (Exception e) { r.Check(false, "unexpected error: " + e); }
-            return r.Done("registered, connected in both modes, used the system proxy and restored it");
+            return r.Done("registered, connected in both modes, used the system proxy, changed the domain while connected, and restored the proxy");
         }
 
         // ---------- Screenshots of the window in each state ----------
