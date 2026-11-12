@@ -29,3 +29,5 @@ Compress-Archive -Path $dist -DestinationPath $zip -Force
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "Built $zip"
 Write-Host "SHA-256 $hash"
+# Tell the GitHub workflow which version was built (used to name the Release).
+if ($env:GITHUB_ENV) { "APP_VERSION=$Version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
