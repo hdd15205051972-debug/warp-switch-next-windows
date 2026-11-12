@@ -152,6 +152,8 @@ namespace WarpSwitchNext
             ring.Tint = Palette.ForPhase(s.Phase);
             ring.Busy = c.Busy;
             ring.Connected = s.Phase == "on";
+            ring.Failed = s.Phase == "error";
+            ring.Off = s.Phase == "off";
             stateLabel.Text = c.Title;
             messageLabel.Text = s.Message;
             ipValue.Text = s.Ip;

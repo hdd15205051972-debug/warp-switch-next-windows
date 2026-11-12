@@ -8,7 +8,7 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 
 ## 下载和安装
 
-从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-1.0.0.zip`。
+从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-1.0.1.zip`。
 
 1. 解压，把「WARP 新开关」文件夹放到一个固定的位置（例如「文档」或 `D:\Apps`）。打开开机自动连接后不要再移动它。
 2. 双击 `WARP 新开关.exe`。程序没有代码签名，Windows 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
@@ -22,7 +22,7 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 - **修改伪装域名**：点「伪装域名」一行的「修改」；默认 `www.bing.com`。SNI 改变不会把 Cloudflare 的入口 IP 变成另一家网站的 IP。
 - **连接模式**：「自动尝试」先用 TLS ClientHello 记录分片，再尝试不分片的兼容模式；也可手动固定其中一种。
 - **开机时自动连接**：打开后，登录 Windows 时程序在任务栏通知区域（右下角）后台启动，等网络就绪后自动连接。电脑睡眠唤醒或网络恢复时，如果连接已经中断，也会自动重新连接；连接失败会隔一段时间（30 秒起，最长 5 分钟）再试。手动点「关闭」后不会自动重连，直到你再次开启。
-- **通知区域图标**：盾牌颜色表示状态（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。关掉窗口后程序仍在后台运行，点图标可重新打开窗口；「退出」会先关闭连接并恢复代理。
+- **通知区域图标**：程序图标右下角的小圆点表示状态（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。关掉窗口后程序仍在后台运行，点图标可重新打开窗口；「退出」会先关闭连接并恢复代理。
 - **打开日志**：打开数据文件夹，里面的 `worker.log`、`connection.log` 记录了连接过程。
 
 ## 系统代理如何设置
@@ -63,13 +63,13 @@ cd warp-switch-next-windows
 
 ### 换成自己的图标
 
-准备一个 `.ico` 文件（建议包含 16～256 像素各尺寸），这样编译：
+程序图标来自 `assets/AppIcon.png`。换成另一张方形图片后运行 `python3 tools/make_icon.py` 生成 `assets/AppIcon.ico`，再重新构建。也可以直接指定一个 `.ico`（建议包含 16～256 像素各尺寸）：
 
 ```powershell
-dotnet build src/WarpSwitchNext.csproj -c Release -o build/app -p:CustomIcon=true -p:AppIconFile=C:\path\to\icon.ico
+dotnet build src/WarpSwitchNext.csproj -c Release -o build/app -p:AppIconFile=C:\path\to\icon.ico
 ```
 
-程序文件、窗口、任务栏都会用这个图标；通知区域图标是它加右下角一个表示状态的小圆点（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。把 `build/app/WarpSwitchNext.exe` 换进程序文件夹即可。
+程序文件、窗口、任务栏、窗口中间的状态图和通知区域图标都会用这个图标。
 
 ## 测试
 

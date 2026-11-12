@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -63,34 +64,28 @@ namespace WarpSwitchNext
             return path;
         }
 
-        /// <summary>The project's shield, fitted into the given box.</summary>
-        public static GraphicsPath Shield(RectangleF box)
+        /// <summary>A small round status badge: a white-edged coloured disc with a check (connected) or "!" (failed).</summary>
+        public static void Badge(Graphics g, RectangleF r, Color color, bool check)
         {
-            // Designed on a 1024 grid (y down); the shield spans x 274..750, y 224..803.
-            float w = 476, h = 579;
-            float scale = Math.Min(box.Width / w, box.Height / h);
-            float ox = box.X + (box.Width - w * scale) / 2 - 274 * scale;
-            float oy = box.Y + (box.Height - h * scale) / 2 - 224 * scale;
-            PointF P(float x, float y) => new PointF(ox + x * scale, oy + y * scale);
-            var path = new GraphicsPath();
-            path.AddLine(P(512, 224), P(750, 320));
-            path.AddLine(P(750, 320), P(750, 534));
-            path.AddBezier(P(750, 534), P(750, 674), P(630, 749), P(512, 803));
-            path.AddBezier(P(512, 803), P(395, 749), P(274, 674), P(274, 534));
-            path.AddLine(P(274, 534), P(274, 320));
-            path.CloseFigure();
-            return path;
-        }
-
-        /// <summary>The check mark that sits inside the shield, in the same coordinates.</summary>
-        public static PointF[] Check(RectangleF box, out float penWidth)
-        {
-            float w = 476, h = 579;
-            float scale = Math.Min(box.Width / w, box.Height / h);
-            float ox = box.X + (box.Width - w * scale) / 2 - 274 * scale;
-            float oy = box.Y + (box.Height - h * scale) / 2 - 224 * scale;
-            penWidth = 52 * scale;
-            return new[] { new PointF(ox + 390 * scale, oy + 514 * scale), new PointF(ox + 485 * scale, oy + 604 * scale), new PointF(ox + 640 * scale, oy + 404 * scale) };
+            using (var edge = new SolidBrush(Color.White)) g.FillEllipse(edge, r);
+            var inner = RectangleF.Inflate(r, -r.Width * 0.09f, -r.Height * 0.09f);
+            using (var fill = new SolidBrush(color)) g.FillEllipse(fill, inner);
+            float w = inner.Width;
+            using (var pen = new Pen(Color.White, Math.Max(1.5f, w * 0.14f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            {
+                if (check)
+                    g.DrawLines(pen, new[]
+                    {
+                        new PointF(inner.X + w * 0.28f, inner.Y + w * 0.52f),
+                        new PointF(inner.X + w * 0.44f, inner.Y + w * 0.67f),
+                        new PointF(inner.X + w * 0.73f, inner.Y + w * 0.35f),
+                    });
+                else
+                {
+                    g.DrawLine(pen, inner.X + w / 2, inner.Y + w * 0.26f, inner.X + w / 2, inner.Y + w * 0.56f);
+                    g.DrawLine(pen, inner.X + w / 2, inner.Y + w * 0.74f, inner.X + w / 2, inner.Y + w * 0.745f);
+                }
+            }
         }
 
         public static Icon AppIcon()
@@ -113,11 +108,7 @@ namespace WarpSwitchNext
 
         static readonly Dictionary<string, Icon> trayIcons = new Dictionary<string, Icon>();
 
-        /// <summary>
-        /// Small tray icon showing the connection state. Default builds: a shield coloured by state,
-        /// with a check when connected. Builds with a custom app icon (CustomIcon=true): that icon
-        /// with a small coloured dot in the corner.
-        /// </summary>
+        /// <summary>Small tray icon: the app icon with a coloured dot for the connection state.</summary>
         public static Icon TrayIcon(string phase)
         {
             var key = phase == "on" ? "on" : phase == "error" ? "error" : phase == "off" ? "off" : "busy";
@@ -128,26 +119,14 @@ namespace WarpSwitchNext
                 using (var g = Graphics.FromImage(bmp))
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                    var color = key == "on" ? Palette.Green : key == "error" ? Palette.Orange : key == "off" ? Palette.Gray : Palette.Blue;
-#if CUSTOM_ICON
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    var color = key == "on" ? Palette.Green : key == "error" ? Palette.Orange : key == "off" ? Palette.Gray : Palette.Blue;
                     using (var picture = AppImage(size)) g.DrawImage(picture, new Rectangle(0, 0, size, size));
                     float d = size * 0.5f;
                     var dot = new RectangleF(size - d, size - d, d - 0.5f, d - 0.5f);
                     using (var ring = new SolidBrush(Color.White)) g.FillEllipse(ring, dot);
                     float edge = Math.Max(1.2f, size * 0.07f);
                     using (var fill = new SolidBrush(color)) g.FillEllipse(fill, RectangleF.Inflate(dot, -edge, -edge));
-#else
-                    var box = new RectangleF(size * 0.06f, size * 0.03f, size * 0.88f, size * 0.94f);
-                    using (var shield = Shield(box))
-                    using (var brush = new SolidBrush(color)) g.FillPath(brush, shield);
-                    if (key == "on")
-                    {
-                        var points = Check(box, out float width);
-                        using (var pen = new Pen(Color.White, Math.Max(1.6f, width)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
-                            g.DrawLines(pen, points);
-                    }
-#endif
                 }
                 IntPtr handle = bmp.GetHicon();
                 var icon = (Icon)Icon.FromHandle(handle).Clone();
@@ -158,13 +137,18 @@ namespace WarpSwitchNext
         }
     }
 
-    /// <summary>The large status circle: a soft disc, a ring, and the shield (or a spinner while busy).</summary>
+    /// <summary>
+    /// The large status circle: the app picture in a round frame whose ring colour shows the state.
+    /// Off: grey ring, picture in black and white. Busy: blue spinner, picture faded.
+    /// Connected: green ring and a check badge. Failed: orange ring and a "!" badge.
+    /// </summary>
     sealed class StatusRing : Control
     {
+        static Bitmap picture;
         readonly Timer spin = new Timer { Interval = 33 };
         float angle;
         Color tint = Palette.Gray;
-        bool busy, connected;
+        bool busy, connected, failed, off;
 
         public StatusRing()
         {
@@ -176,35 +160,68 @@ namespace WarpSwitchNext
 
         public Color Tint { get => tint; set { if (tint != value) { tint = value; Invalidate(); } } }
         public bool Connected { get => connected; set { if (connected != value) { connected = value; Invalidate(); } } }
+        public bool Failed { get => failed; set { if (failed != value) { failed = value; Invalidate(); } } }
+        public bool Off { get => off; set { if (off != value) { off = value; Invalidate(); } } }
         public bool Busy
         {
             get => busy;
             set { if (busy == value) return; busy = value; spin.Enabled = value; Invalidate(); }
         }
 
+        static ImageAttributes Look(bool grey, bool faded)
+        {
+            if (!grey && !faded) return null;
+            float a = faded ? 0.55f : 1f;
+            var m = grey
+                ? new ColorMatrix(new[]
+                {
+                    new[] { 0.30f, 0.30f, 0.30f, 0, 0 },
+                    new[] { 0.59f, 0.59f, 0.59f, 0, 0 },
+                    new[] { 0.11f, 0.11f, 0.11f, 0, 0 },
+                    new[] { 0f, 0, 0, a, 0 },
+                    new[] { 0f, 0, 0, 0, 1 },
+                })
+                : new ColorMatrix { Matrix33 = a };
+            var attrs = new ImageAttributes();
+            attrs.SetColorMatrix(m);
+            return attrs;
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             float s = Math.Min(Width, Height);
-            float stroke = Math.Max(2f, s * 0.024f);
+            float stroke = Math.Max(2f, s * 0.03f);
             var outer = new RectangleF((Width - s) / 2 + stroke, (Height - s) / 2 + stroke, s - stroke * 2, s - stroke * 2);
-            using (var fill = new SolidBrush(Color.FromArgb(26, tint))) g.FillEllipse(fill, outer);
-            using (var ring = new Pen(Color.FromArgb(busy ? 60 : 120, tint), stroke)) g.DrawEllipse(ring, outer);
+
+            // The picture, cropped to a circle inside the ring (overscanned so the icon's own edge never shows).
+            if (picture == null) picture = Ui.AppImage(256);
+            var inner = RectangleF.Inflate(outer, -stroke * 1.4f, -stroke * 1.4f);
+            var dest = RectangleF.Inflate(inner, inner.Width * 0.07f, inner.Height * 0.07f);
+            using (var attrs = Look(off, busy))
+            using (var brush = attrs == null
+                ? new TextureBrush(picture, WrapMode.Clamp)
+                : new TextureBrush(picture, new Rectangle(0, 0, picture.Width, picture.Height), attrs))
+            {
+                brush.WrapMode = WrapMode.Clamp;
+                brush.Transform = new Matrix(dest.Width / picture.Width, 0, 0, dest.Height / picture.Height, dest.X, dest.Y);
+                g.FillEllipse(brush, inner);
+            }
+
+            using (var ring = new Pen(Color.FromArgb(busy ? 70 : 255, tint), stroke)) g.DrawEllipse(ring, outer);
             if (busy)
             {
-                using (var arc = new Pen(tint, stroke * 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                using (var arc = new Pen(tint, stroke * 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                     g.DrawArc(arc, outer, angle - 90, 80);
             }
-            var box = RectangleF.Inflate(outer, -outer.Width * 0.27f, -outer.Height * 0.25f);
-            using (var shield = Ui.Shield(box))
-            using (var brush = new SolidBrush(busy ? Color.FromArgb(150, tint) : tint))
-                g.FillPath(brush, shield);
-            if (connected && !busy)
+            if ((connected || failed) && !busy)
             {
-                var points = Ui.Check(box, out float width);
-                using (var pen = new Pen(Color.White, width) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
-                    g.DrawLines(pen, points);
+                float b = s * 0.3f;
+                var badge = new RectangleF(outer.Right - b * 0.92f, outer.Bottom - b * 0.92f, b, b);
+                Ui.Badge(g, badge, tint, check: connected);
             }
         }
 

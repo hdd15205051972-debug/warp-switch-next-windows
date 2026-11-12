@@ -1,4 +1,4 @@
-WARP 新开关 · Windows 版 1.0.0
+WARP 新开关 · Windows 版 1.0.1
 ================================
 
 适用于 Windows 10（1803 或更新）和 Windows 11。非官方客户端，与 Cloudflare 无隶属关系。
