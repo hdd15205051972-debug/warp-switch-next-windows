@@ -197,8 +197,11 @@ namespace WarpSwitchNext
         static void Link(LinkLabel link, string text, Rectangle bounds, ContentAlignment align, Action action)
         {
             link.Text = text;
-            link.Bounds = bounds;
-            link.TextAlign = align;
+            // Exactly as wide as its text, so a click anywhere on the link opens it.
+            link.AutoSize = true;
+            link.Padding = new Padding(0, 3, 0, 3);
+            var size = link.PreferredSize;
+            link.Location = new Point(align == ContentAlignment.MiddleRight ? bounds.Right - size.Width : bounds.Left, bounds.Top + (bounds.Height - size.Height) / 2);
             link.LinkBehavior = LinkBehavior.HoverUnderline;
             link.LinkClicked += (s, e) => action();
         }
