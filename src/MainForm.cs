@@ -198,6 +198,7 @@ namespace WarpSwitchNext
         {
             link.Text = text;
             // Exactly as wide as its text, so a click anywhere on the link opens it.
+            link.Font = Ui.Font(9f); // measure with the window's font
             link.AutoSize = true;
             link.Padding = new Padding(0, 3, 0, 3);
             var size = link.PreferredSize;
