@@ -39,7 +39,7 @@ namespace WarpSwitchNext
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(420, 748);
+            ClientSize = new Size(420, 672);
             BackColor = Palette.Window;
             Font = Ui.Font(9f);
 
@@ -49,22 +49,22 @@ namespace WarpSwitchNext
             var subtitle = new Label { Text = "MASQUE over HTTP/2 · 伪装域名", Bounds = new Rectangle(84, 50, 300, 20), ForeColor = Palette.Secondary };
 
             // Status
-            ring.Bounds = new Rectangle(148, 88, 124, 124);
+            ring.Bounds = new Rectangle(160, 80, 100, 100);
             stateLabel.Name = "StateLabel";
-            stateLabel.Bounds = new Rectangle(24, 220, 372, 34);
+            stateLabel.Bounds = new Rectangle(24, 184, 372, 34);
             stateLabel.TextAlign = ContentAlignment.MiddleCenter;
             stateLabel.Font = Ui.Font(17f, FontStyle.Bold);
             stateLabel.ForeColor = Palette.Text;
             messageLabel.Name = "MessageLabel";
-            messageLabel.Bounds = new Rectangle(24, 256, 372, 54);
+            messageLabel.Bounds = new Rectangle(24, 219, 372, 52);
             messageLabel.TextAlign = ContentAlignment.TopCenter;
             messageLabel.ForeColor = Palette.Secondary;
 
             // 伪装域名: a plain text box that is always editable, and an 应用 button.
-            var sniLabel = new Label { Text = "伪装域名（TLS 握手里显示的域名）", Bounds = new Rectangle(24, 318, 372, 20), ForeColor = Palette.Secondary };
+            var sniLabel = new Label { Text = "伪装域名（TLS 握手里显示的域名）", Bounds = new Rectangle(24, 276, 372, 20), ForeColor = Palette.Secondary };
             sniBox.Name = "SniBox";
             sniBox.AccessibleName = "伪装域名";
-            sniBox.Bounds = new Rectangle(24, 341, 282, 28);
+            sniBox.Bounds = new Rectangle(24, 298, 282, 28);
             sniBox.Font = Ui.Mono(11f);
             sniBox.ImeMode = ImeMode.Disable; // domains are English letters: keep the Chinese input method off
             sniBox.Text = c.Settings.Sni;
@@ -75,17 +75,18 @@ namespace WarpSwitchNext
                 if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; sniEdited = false; sniBox.Text = c.Settings.Sni; ShowHint(null); }
             };
             applyButton.Name = "ApplySni";
+            applyButton.AccessibleName = "应用伪装域名";
             applyButton.Text = "应用";
-            applyButton.Bounds = new Rectangle(312, 340, 84, 30);
+            applyButton.Bounds = new Rectangle(312, 297, 84, 30);
             applyButton.UseVisualStyleBackColor = true;
             applyButton.Click += (s, e) => ApplySni();
             sniHint.Name = "SniHint";
-            sniHint.Bounds = new Rectangle(24, 373, 372, 34);
+            sniHint.Bounds = new Rectangle(24, 329, 372, 30);
             sniHint.Font = Ui.Font(8f);
             ShowHint(null);
 
             // Details card
-            info.Bounds = new Rectangle(24, 412, 372, 124);
+            info.Bounds = new Rectangle(24, 362, 372, 120);
             info.Rows = 3;
             AddRow(0, "出口 IP", ipValue);
             AddRow(1, "节点", coloValue);
@@ -93,32 +94,33 @@ namespace WarpSwitchNext
             ipValue.Name = "IpValue";
 
             // Auto-connect
-            var autoLabel = new Label { Text = "开机时自动连接", Bounds = new Rectangle(26, 550, 260, 20), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Palette.Secondary };
-            var autoCaption = new Label { Text = "唤醒、网络恢复后也会自动重连", Bounds = new Rectangle(26, 570, 260, 18), Font = Ui.Font(8f), ForeColor = Palette.Tertiary };
+            var autoLabel = new Label { Text = "开机时自动连接", Bounds = new Rectangle(26, 494, 260, 20), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Palette.Secondary };
+            var autoCaption = new Label { Text = "唤醒、网络恢复后也会自动重连", Bounds = new Rectangle(26, 514, 260, 18), Font = Ui.Font(8f), ForeColor = Palette.Tertiary };
             autoSwitch.Name = "AutoConnect";
-            autoSwitch.Bounds = new Rectangle(354, 558, 42, 22);
+            autoSwitch.Bounds = new Rectangle(354, 502, 42, 22);
             autoSwitch.AccessibleName = "开机时自动连接";
             autoSwitch.Toggle += (s, e) => c.SetAutoConnect(!c.AutoConnect);
 
             // Main button
             mainButton.Name = "MainButton";
-            mainButton.Bounds = new Rectangle(24, 602, 372, 50);
+            mainButton.AccessibleName = "开启或关闭连接";
+            mainButton.Bounds = new Rectangle(24, 544, 372, 48);
             mainButton.Font = Ui.Font(13f, FontStyle.Bold);
             mainButton.Click += (s, e) => { if (c.Working) c.UserStop(); else c.UserStart(); };
 
             // Small actions
-            Link(diagnoseLink, "网络诊断", new Rectangle(26, 666, 120, 22), ContentAlignment.MiddleLeft, ShowDiagnostics);
+            Link(diagnoseLink, "网络诊断", new Rectangle(26, 602, 120, 22), ContentAlignment.MiddleLeft, ShowDiagnostics);
             diagnoseLink.Name = "Diagnose";
-            Link(logLink, "打开日志", new Rectangle(244, 666, 76, 22), ContentAlignment.MiddleRight, () => Util.OpenFolder(c.DataDir));
-            Link(exitLink, "退出", new Rectangle(326, 666, 70, 22), ContentAlignment.MiddleRight, () => ExitRequested?.Invoke());
+            Link(logLink, "打开日志", new Rectangle(244, 602, 76, 22), ContentAlignment.MiddleRight, () => Util.OpenFolder(c.DataDir));
+            Link(exitLink, "退出", new Rectangle(326, 602, 70, 22), ContentAlignment.MiddleRight, () => ExitRequested?.Invoke());
 
             // Footer
-            footer.Bounds = new Rectangle(24, 700, 372, 18);
+            footer.Bounds = new Rectangle(24, 632, 372, 18);
             footer.TextAlign = ContentAlignment.MiddleCenter;
             footer.Font = Ui.Font(8f);
             footer.ForeColor = Palette.Tertiary;
             termsLink.Text = "Cloudflare 服务条款";
-            termsLink.Bounds = new Rectangle(24, 718, 372, 18);
+            termsLink.Bounds = new Rectangle(24, 650, 372, 18);
             termsLink.TextAlign = ContentAlignment.MiddleCenter;
             termsLink.Font = Ui.Font(8f);
             termsLink.LinkBehavior = LinkBehavior.HoverUnderline;
@@ -180,7 +182,7 @@ namespace WarpSwitchNext
 
         void AddRow(int index, string name, Label value)
         {
-            int y = index * 41 + 10;
+            int y = index * 40 + 10;
             var key = new Label { Text = name, Bounds = new Rectangle(16, y, 110, 20), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Palette.Secondary, BackColor = Palette.Card };
             value.Bounds = new Rectangle(126, y, 230, 20);
             value.TextAlign = ContentAlignment.MiddleRight;

@@ -58,14 +58,39 @@ function Shot($name) {
 }
 $AE = [System.Windows.Automation.AutomationElement]
 $Tree = [System.Windows.Automation.TreeScope]
+# Controls are found by their WinForms name (AutomationId) or, if UI Automation doesn't expose it, by what a person sees.
+$Fallback = @{ SniBox = '伪装域名'; ApplySni = '应用伪装域名'; MainButton = '开启或关闭连接'; Diagnose = '网络诊断' }
+$States = @('已关闭', '已连接', '正在连接', '正在重连', '正在关闭', '正在注册', '暂未连接')
+function Texts($root) {
+    $cond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
+    return @($root.FindAll($Tree::Descendants, $cond))
+}
 function Find($root, $id) {
-    $cond = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $id)
+    $byId = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $id)
     for ($i = 0; $i -lt 50; $i++) {
-        $e = $root.FindFirst($Tree::Descendants, $cond)
+        $e = $root.FindFirst($Tree::Descendants, $byId)
+        if (-not $e -and $Fallback.ContainsKey($id)) {
+            $byName = New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty, $Fallback[$id])
+            $e = $root.FindFirst($Tree::Descendants, $byName)
+            # A text box's name may come from its label: take the edit control.
+            if ($e -and $id -eq 'SniBox' -and $e.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
+                $edit = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+                $e = $root.FindFirst($Tree::Descendants, $edit)
+            }
+        }
+        if (-not $e -and $id -eq 'StateLabel') { $e = Texts $root | Where-Object { $States -contains $_.Current.Name } | Select-Object -First 1 }
         if ($e) { return $e }
         Start-Sleep -Milliseconds 200
     }
+    Log "info  controls in the window:"
+    foreach ($c in @($root.FindAll($Tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition))) {
+        Log ("      " + $c.Current.ControlType.ProgrammaticName + " id='" + $c.Current.AutomationId + "' name='" + $c.Current.Name + "' class='" + $c.Current.ClassName + "'")
+    }
     throw "control $id not found"
+}
+function TextLike($pattern) {
+    $t = Texts $script:window | Where-Object { $_.Current.Name -like $pattern } | Select-Object -First 1
+    if ($t) { return $t.Current.Name } else { return '' }
 }
 function Center($e) {
     $r = $e.Current.BoundingRectangle
@@ -103,7 +128,9 @@ $hasAccount = Test-Path (Join-Path $Data 'account.json')
 Log "info  data: $Data (account: $hasAccount)"
 $app = Start-Process -FilePath $Exe -PassThru
 try {
-    $byPid = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $app.Id)
+    $byPid = New-Object System.Windows.Automation.AndCondition(
+        (New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $app.Id)),
+        (New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty, 'WARP 新开关')))
     $script:window = $null
     for ($i = 0; $i -lt 100 -and -not $script:window; $i++) { Start-Sleep -Milliseconds 200; $script:window = $AE::RootElement.FindFirst($Tree::Children, $byPid) }
     Check ($null -ne $script:window) "window opened: $($script:window.Current.Name)"
@@ -122,7 +149,7 @@ try {
 
     # 2. Something that isn't a domain: refused with a message, nothing saved.
     TypeSni '学校网站'
-    $hint = (Find $script:window 'SniHint').Current.Name
+    $hint = TextLike '*不是有效的域名*'
     Check ($hint -like '*不是有效的域名*' -and (SavedSni) -eq 'dock.schoology.com') "invalid input refused: $hint"
     Shot 'ui-2-invalid'
     TypeSni 'www.cloudflare.com' -Enter
@@ -132,7 +159,7 @@ try {
         # 3. Connect with the mouse, change the 伪装域名 while connected.
         ClickOn (Find $script:window 'MainButton')
         $on = WaitFor { (State) -eq '已连接' } 90
-        Check $on "clicked 开启 -> $(State): $((Find $script:window 'MessageLabel').Current.Name)"
+        Check $on "clicked 开启 -> $(State): $(TextLike '已连接 ·*')"
         Check ((UsqueArgs) -match 'socks -b 127\.0\.0\.1 -p 1080 --http2 -s www\.cloudflare\.com') "usque runs as in the reference: $(UsqueArgs)"
         Shot 'ui-3-connected'
         if ($on) {
@@ -141,14 +168,14 @@ try {
             Check ((SavedSni) -eq 'www.bing.com') "while connected: typed www.bing.com + clicked 应用 -> saved"
             Start-Sleep -Seconds 2
             $again = WaitFor { (State) -eq '已连接' -and (UsqueArgs) -match '-s www\.bing\.com' } 90
-            Check $again "reconnected by itself with www.bing.com: $(State), exit IP $((Find $script:window 'IpValue').Current.Name)"
+            Check $again "reconnected by itself with www.bing.com: $(State) $(TextLike '已连接 ·*')"
             Log "info  running: usque $(UsqueArgs)"
             Shot 'ui-4-changed-while-connected'
         }
 
         # 4. 网络诊断 from the window.
         ClickOn (Find $script:window 'Diagnose')
-        $diagCond = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, 'DiagnosticsWindow')
+        $diagCond = New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty, '网络诊断 - WARP 新开关')
         $diag = $null
         for ($i = 0; $i -lt 50 -and -not $diag; $i++) {
             Start-Sleep -Milliseconds 200
@@ -157,7 +184,7 @@ try {
         }
         Check ($null -ne $diag) "clicked 网络诊断 -> window opened"
         if ($diag) {
-            $text = Find $diag 'DiagnosticsOutput'
+x
             $done = WaitFor { (Value $text) -match '结论' } 90
             $result = (Value $text) -split "`r`n" | Where-Object { $_ -match '结论|✅|❌' }
             $result | ForEach-Object { Log "    | $_" }
