@@ -22,9 +22,11 @@ namespace WarpSwitchNext
 
     static class Ports
     {
-        public const int Proxy = 7891;
-        public const int Relay = 18443;
-        public const string ProxyAddress = "127.0.0.1:7891";
+        /// <summary>sing-box mixed (HTTP + SOCKS5) proxy that the system proxy points at.</summary>
+        public const int Proxy = 7890;
+        /// <summary>usque's local SOCKS5 port; sing-box forwards to it.</summary>
+        public const int Socks = 1080;
+        public const string ProxyAddress = "127.0.0.1:7890";
     }
 
     static class Paths
@@ -40,32 +42,9 @@ namespace WarpSwitchNext
         }
 
         public static string AppDirectory => AppDomain.CurrentDomain.BaseDirectory;
-
-        /// <summary>The usque build that matches this PC: ARM64, x64, or 32-bit Windows.</summary>
-        public static string Usque
-        {
-            get
-            {
-                var core = Path.Combine(AppDirectory, "core");
-                string arch = !Environment.Is64BitOperatingSystem ? "386" : NativeArm64() ? "arm64" : "amd64";
-                var best = Path.Combine(core, "usque-" + arch + ".exe");
-                if (File.Exists(best)) return best;
-                // x64 builds also run on ARM64 Windows through emulation.
-                return Path.Combine(core, "usque-amd64.exe");
-            }
-        }
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool IsWow64Process2(IntPtr process, out ushort processMachine, out ushort nativeMachine);
-
-        static bool NativeArm64()
-        {
-            try
-            {
-                return IsWow64Process2(Process.GetCurrentProcess().Handle, out _, out ushort native) && native == 0xAA64;
-            }
-            catch (EntryPointNotFoundException) { return false; } // Windows 10 before 1709
-        }
+        public static string Core => Path.Combine(AppDirectory, "core");
+        public static string Usque => Path.Combine(Core, "usque.exe");
+        public static string SingBox => Path.Combine(Core, "sing-box.exe");
     }
 
     static class Util
@@ -176,17 +155,17 @@ namespace WarpSwitchNext
 
     sealed class Settings
     {
-        public string Sni { get; set; } = "www.bing.com";
-        public string Mode { get; set; } = "auto";
+        /// <summary>The domain shown in the TLS handshake (SNI) instead of WARP's own, which networks block.</summary>
+        public string Sni { get; set; } = Defaults.Sni;
         public bool AutoConnect { get; set; }
         public bool TrayTipShown { get; set; }
     }
 
-    sealed class CachedRoute
+    static class Defaults
     {
-        public string Endpoint { get; set; }
-        public string Sni { get; set; }
-        public bool Fragmented { get; set; }
+        public const string Sni = "www.cloudflare.com";
+        /// <summary>SNIs known to reach WARP in the reference project's tests; tried by 网络诊断.</summary>
+        public static readonly string[] SniCandidates = { "www.cloudflare.com", "cloudflareaccess.com", "www.bing.com" };
     }
 
     static class Account

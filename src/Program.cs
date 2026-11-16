@@ -23,12 +23,7 @@ namespace WarpSwitchNext
             if (args.Contains("--self-test")) return SelfTest.Units(Option("--out"));
             if (args.Contains("--proxy-test")) return SelfTest.Proxy(Option("--out"));
             if (args.Contains("--connect-test")) return SelfTest.Connect(Option("--data"), Option("--out"));
-            if (args.Contains("--edit-test"))
-            {
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                return SelfTest.Edit(Option("--out"));
-            }
+            if (args.Contains("--diagnose-test")) return SelfTest.Diagnose(Option("--data"), Option("--out"));
             if (args.Contains("--screenshots"))
             {
                 Application.EnableVisualStyles();
@@ -48,7 +43,7 @@ namespace WarpSwitchNext
                     show.Set(); // bring the running copy's window to the front
                     return 0;
                 }
-                var controller = new AppController(Paths.Data, Paths.Usque);
+                var controller = new AppController(Paths.Data, Paths.Usque, Paths.SingBox);
                 Application.ThreadException += (s, e) =>
                 {
                     new LogFile(System.IO.Path.Combine(controller.DataDir, "worker.log")).Line("UI error: " + e.Exception);

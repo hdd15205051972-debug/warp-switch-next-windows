@@ -1,8 +1,9 @@
 name: Build Windows app
 
 # Builds the Windows version on a real Windows machine and tests it:
-# unit checks, setting and restoring the system proxy, screenshots of the window,
-# and a real WARP connection (register, connect in both modes, browse through the system proxy).
+# unit checks, setting and restoring the system proxy, screenshots of the window, a real WARP
+# connection (usque --http2 + sing-box, browse through the system proxy, change the 伪装域名 while
+# connected), 网络诊断, and the window driven with the real mouse and keyboard.
 # On main, a version (build.ps1) that has no Release yet is published once every test has passed.
 on:
   push:
@@ -15,12 +16,17 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: false
 
       - name: Build
         run: ./build.ps1
@@ -37,13 +43,6 @@ jobs:
           $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
           $p = Start-Process -FilePath $exe -ArgumentList '--proxy-test', '--out', "$PWD\proxytest.txt" -Wait -PassThru
           Get-Content proxytest.txt
-          exit $p.ExitCode
-
-      - name: Settings test
-        run: |
-          $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
-          $p = Start-Process -FilePath $exe -ArgumentList '--edit-test', '--out', "$PWD\edittest.txt" -Wait -PassThru
-          Get-Content edittest.txt
           exit $p.ExitCode
 
       - name: Screenshots
@@ -66,13 +65,37 @@ jobs:
           Get-ChildItem $data -Filter *.log | Copy-Item -Destination connect-logs
           exit $p.ExitCode
 
+      - name: Network diagnostics test
+        id: diagnose
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
+          $data = Join-Path $env:RUNNER_TEMP 'warpdata'
+          $p = Start-Process -FilePath $exe -ArgumentList '--diagnose-test', '--data', $data, '--out', "$PWD\diagnosetest.txt" -Wait -PassThru
+          Get-Content diagnosetest.txt
+          exit $p.ExitCode
+
+      - name: Real mouse and keyboard test
+        id: ui
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          $exe = (Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe').Path
+          $data = Join-Path $env:RUNNER_TEMP 'warpdata'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/ui-test.ps1 -Exe $exe -Data $data -Out "$PWD\uitest.txt" -Shots "$PWD\screenshots"
+          $code = $LASTEXITCODE
+          Get-ChildItem $data -Filter *.log | Copy-Item -Destination connect-logs -ErrorAction SilentlyContinue
+          exit $code
+
       - uses: actions/upload-artifact@v4
         with:
           name: WARP-Switch-Next-Windows
           path: dist/*.zip
 
       - name: Publish release
-        if: github.ref == 'refs/heads/main' && steps.connect.outcome == 'success'
+        if: github.ref == 'refs/heads/main' && steps.connect.outcome == 'success' && steps.diagnose.outcome == 'success' && steps.ui.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -92,8 +115,15 @@ jobs:
           path: |
             selftest.txt
             proxytest.txt
-            edittest.txt
+            diagnosetest.txt
+            uitest.txt
             screenshots.txt
             connecttest.txt
             screenshots/
             connect-logs/
+
+      - name: Fail if a test failed
+        if: steps.connect.outcome != 'success' || steps.diagnose.outcome != 'success' || steps.ui.outcome != 'success'
+        run: |
+          Write-Host "connect=${{ steps.connect.outcome }} diagnose=${{ steps.diagnose.outcome }} ui=${{ steps.ui.outcome }}"
+          exit 1

@@ -15,7 +15,7 @@ namespace WarpSwitchNext
         readonly NotifyIcon tray = new NotifyIcon();
         readonly ToolStripMenuItem statusItem = new ToolStripMenuItem { Enabled = false };
         readonly ToolStripMenuItem toggleItem = new ToolStripMenuItem();
-        readonly ToolStripMenuItem retryItem = new ToolStripMenuItem("换入口重试");
+        readonly ToolStripMenuItem retryItem = new ToolStripMenuItem("重新连接");
         readonly ToolStripMenuItem autoItem = new ToolStripMenuItem("开机时自动连接");
         string lastPhase = "off";
         bool exiting;
@@ -104,7 +104,7 @@ namespace WarpSwitchNext
                 c.Settings.TrayTipShown = true;
                 c.SaveSettings();
                 tray.ShowBalloonTip(6000, "WARP 新开关仍在运行",
-                    "可以在任务栏右下角的盾牌图标里打开窗口或退出。", ToolTipIcon.Info);
+                    "可以在任务栏右下角的猫猫图标里打开窗口或退出。", ToolTipIcon.Info);
             }
         }
 

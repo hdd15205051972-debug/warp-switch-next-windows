@@ -45,31 +45,21 @@ namespace WarpSwitchNext
             var r = new Report(outFile);
             try
             {
-                var body = new byte[512];
-                body[0] = 1;
-                for (int i = 1; i < body.Length; i++) body[i] = (byte)((i - 1) % 256);
-                var input = new List<byte> { 22, 3, 1, 2, 0 };
-                input.AddRange(body);
-                var trailer = new byte[] { 20, 3, 3, 0, 1, 1 };
-                input.AddRange(trailer);
-                var bytes = input.ToArray();
-                foreach (var size in new[] { 1, 16, 48, 256, 1024 })
-                {
-                    var parts = ClientHello.Split(bytes, bytes.Length, size);
-                    var rebuilt = new List<byte>();
-                    bool headers = true;
-                    foreach (var part in parts.Take(parts.Count - 1))
-                    {
-                        headers &= part[0] == 22 && part[1] == 3 && part[2] == 1 && part[3] * 256 + part[4] == part.Length - 5;
-                        rebuilt.AddRange(part.Skip(5));
-                    }
-                    r.Check(headers && rebuilt.SequenceEqual(body) && parts.Last().SequenceEqual(trailer), "ClientHello split into " + size + "-byte records and reassembled");
-                }
-                r.Check(ClientHello.Split(bytes, 4) == null, "incomplete header waits for more data");
-                r.Check(ClientHello.Split(bytes, 100) == null, "incomplete record waits for more data");
-                var other = new byte[] { 23, 3, 3, 0, 1, 42 };
-                var passthrough = ClientHello.Split(other, other.Length);
-                r.Check(passthrough.Count == 1 && passthrough[0].SequenceEqual(other), "non-handshake data passes through unchanged");
+                // The connection is started exactly like the reference project.
+                var args = Engine.UsqueArguments(@"C:\data\account.json", Ports.Socks, "www.cloudflare.com");
+                r.Check(args == "-c \"C:\\data\\account.json\" socks -b 127.0.0.1 -p 1080 --http2 -s www.cloudflare.com", "usque command: " + args);
+                var config = new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject(Engine.SingBoxConfig()) as Dictionary<string, object>;
+                var inbound = ((object[])config["inbounds"])[0] as Dictionary<string, object>;
+                var outbound = ((object[])config["outbounds"])[0] as Dictionary<string, object>;
+                var route = config["route"] as Dictionary<string, object>;
+                r.Check((string)inbound["type"] == "mixed" && (string)inbound["listen"] == "127.0.0.1" && (int)inbound["listen_port"] == Ports.Proxy && !inbound.ContainsKey("set_system_proxy"),
+                        "sing-box listens on 127.0.0.1:" + Ports.Proxy + " (mixed); the app sets the system proxy itself");
+                r.Check((string)outbound["type"] == "socks" && (int)outbound["server_port"] == Ports.Socks && (string)route["final"] == "warp-masque",
+                        "sing-box sends everything to usque on port " + Ports.Socks + ", private addresses direct");
+                var trace = Diagnostics.ParseTrace("fl=1\nip=104.28.1.2\ncolo=LAX\nwarp=on\n");
+                r.Check(Engine.IsWarp(trace) && trace["colo"] == "LAX" && !Engine.IsWarp(Diagnostics.ParseTrace("warp=off")), "trace page parsed (warp=on / off)");
+                r.Check(Defaults.Sni == "www.cloudflare.com" && Defaults.SniCandidates.Contains("cloudflareaccess.com"), "default 伪装域名 is www.cloudflare.com, as in the reference");
+                r.Check(File.Exists(Paths.Usque) && File.Exists(Paths.SingBox), "core\\usque.exe and core\\sing-box.exe are next to the app");
 
                 r.Check(Util.ValidDomain("www.bing.com") && Util.ValidDomain("dock.example.edu"), "valid domains accepted");
                 r.Check(!Util.ValidDomain("evil; command") && !Util.ValidDomain("https://example.com") && !Util.ValidDomain("bing") && !Util.ValidDomain(""), "invalid domains rejected");
@@ -88,19 +78,19 @@ namespace WarpSwitchNext
                 var merged = SystemProxy.MergeBypass("*.corp.example;LOCALHOST");
                 r.Check(merged.StartsWith("*.corp.example;LOCALHOST") && merged.Contains("192.168.*") && merged.Contains("172.31.*") && merged.Contains("<local>")
                         && merged.Split(';').Count(x => x.Equals("localhost", StringComparison.OrdinalIgnoreCase)) == 1, "proxy bypass keeps existing rules and adds local networks");
-                r.Check(SystemProxy.IsOurs(" 127.0.0.1:7891 ") && !SystemProxy.IsOurs("127.0.0.1:8080") && !SystemProxy.IsOurs(null), "own proxy address recognised");
+                r.Check(SystemProxy.IsOurs(" 127.0.0.1:7890 ") && !SystemProxy.IsOurs("127.0.0.1:8080") && !SystemProxy.IsOurs(null), "own proxy address recognised");
 
                 var temp = Path.Combine(Path.GetTempPath(), "warp-switch-test-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(temp);
                 try
                 {
                     var settingsPath = Path.Combine(temp, "settings.json");
-                    Json.Write(settingsPath, new Settings { Sni = "dock.example.edu", Mode = "compatible", AutoConnect = true });
+                    Json.Write(settingsPath, new Settings { Sni = "dock.example.edu", AutoConnect = true });
                     var back = Json.Read<Settings>(settingsPath);
-                    r.Check(back != null && back.Sni == "dock.example.edu" && back.Mode == "compatible" && back.AutoConnect, "settings saved and read back");
-                    File.WriteAllText(settingsPath, "{\"Sni\":\"www.bing.com\"}");
+                    r.Check(back != null && back.Sni == "dock.example.edu" && back.AutoConnect, "settings saved and read back");
+                    File.WriteAllText(settingsPath, "{\"Sni\":\"www.bing.com\",\"Mode\":\"fragment\"}");
                     back = Json.Read<Settings>(settingsPath);
-                    r.Check(back != null && back.Mode == "auto" && !back.AutoConnect, "older settings files still load with defaults");
+                    r.Check(back != null && back.Sni == "www.bing.com" && !back.AutoConnect, "settings files from version 1 still load");
                     var accountPath = Path.Combine(temp, "account.json");
                     File.WriteAllText(accountPath, "{\"private_key\":\"k\",\"id\":\"i\",\"access_token\":\"t\",\"endpoint_pub_key\":\"p\",\"ipv4\":\"172.16.0.2\",\"ipv6\":\"fd01::2\",\"license\":\"x\",\"n\":3}");
                     r.Check(Account.Valid(accountPath) && Account.Load(accountPath) != null, "complete account accepted");
@@ -109,10 +99,9 @@ namespace WarpSwitchNext
                 }
                 finally { try { Directory.Delete(temp, true); } catch { } }
 
-                r.Line("info  usque for this PC: " + Path.GetFileName(Paths.Usque) + ", 64-bit process: " + Environment.Is64BitProcess);
             }
             catch (Exception e) { r.Check(false, "unexpected error: " + e); }
-            return r.Done("relay record splitting, domain checks, proxy rules, settings and account files");
+            return r.Done("usque and sing-box set up like the reference, domain checks, proxy rules, settings and account files");
         }
 
         // ---------- System proxy: changes and restores the Windows proxy (build machine only) ----------
@@ -192,157 +181,145 @@ namespace WarpSwitchNext
             return r.Done("system proxy set, verified and restored");
         }
 
-        // ---------- Changing settings in every state (build machine only: creates a temporary app) ----------
+        // ---------- Real connection: registers a WARP account and connects (build machine only) ----------
 
-        public static int Edit(string outFile)
+        static bool Pump(Func<bool> done, int seconds)
         {
-            var r = new Report(outFile);
-            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-            Application.ThreadException += (s, e) => r.Check(false, "UI error: " + e.Exception);
-            var data = Path.Combine(Path.GetTempPath(), "warp-switch-edit-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(data);
-            try
-            {
-                var c = new AppController(data, Paths.Usque);
-                using (var form = new MainForm(c))
-                {
-                    var states = new (string name, string phase, bool working)[]
-                    {
-                        ("off", "off", false), ("connecting", "connecting", true), ("connected", "on", true),
-                        ("reconnecting", "reconnecting", true), ("failed, waiting to retry", "error", false),
-                    };
-                    foreach (var (name, phase, working) in states)
-                    {
-                        c.Preview(new StateInfo { Phase = phase }, needsSetup: false, working: working, autoConnect: true);
-                        r.Check(form.CanEditDomain && form.CanChangeMode, "伪装域名 and 连接模式 can be changed while " + name);
-                    }
-
-                    // Not connected: the new domain is saved and shown, nothing else happens.
-                    c.Preview(new StateInfo(), needsSetup: false, working: false, autoConnect: false);
-                    var problem = c.ApplyDomain("dock。schoology。com");
-                    var saved = Json.Read<Settings>(Path.Combine(data, "settings.json"));
-                    r.Check(problem == null && c.Settings.Sni == "dock.schoology.com" && saved?.Sni == "dock.schoology.com" && form.ShownDomain == "dock.schoology.com",
-                            "domain typed with the Chinese input method is saved as dock.schoology.com and shown");
-                    r.Check(!c.Stopping, "not connected: saving does not start or stop anything");
-
-                    // Connected: saving a new domain reconnects with it.
-                    c.Preview(new StateInfo { Phase = "on" }, needsSetup: false, working: true, autoConnect: true);
-                    problem = c.ApplyDomain("www.bing.com");
-                    r.Check(problem == null && c.Settings.Sni == "www.bing.com" && c.Stopping, "connected: saving a new domain closes the connection to reconnect with it");
-
-                    // Invalid input: explained, nothing changed.
-                    c.Preview(new StateInfo(), needsSetup: false, working: false, autoConnect: false);
-                    problem = c.ApplyDomain("学校网站");
-                    r.Check(problem != null && c.Settings.Sni == "www.bing.com", "invalid input is refused with a message: " + problem);
-
-                    // Same for the connection mode.
-                    c.Preview(new StateInfo { Phase = "on" }, needsSetup: false, working: true, autoConnect: true);
-                    c.Stopping = false;
-                    c.SetMode("compatible");
-                    r.Check(c.Settings.Mode == "compatible" && c.Stopping, "connected: changing 连接模式 reconnects with it");
-                }
-            }
-            catch (Exception e) { r.Check(false, "unexpected error: " + e); }
-            finally { try { Directory.Delete(data, true); } catch { } }
-            return r.Done("domain and mode can be changed in every state; connected changes reconnect");
+            var until = DateTime.UtcNow.AddSeconds(seconds);
+            while (DateTime.UtcNow < until) { Application.DoEvents(); if (done()) return true; Thread.Sleep(100); }
+            return done();
         }
 
-        // ---------- Real connection: registers a WARP account and connects (build machine only) ----------
+        static bool ViaSystemProxyIsWarp(out string detail)
+        {
+            var t = Engine.Trace(WebRequest.GetSystemWebProxy());
+            detail = "warp=" + (t.TryGetValue("warp", out var w) ? w : "?") + ", ip=" + (t.TryGetValue("ip", out var ip) ? ip : "?") + ", colo=" + (t.TryGetValue("colo", out var c) ? c : "?");
+            return Engine.IsWarp(t);
+        }
+
+        static bool Registered(Report r, string dataDir)
+        {
+            var account = Path.Combine(dataDir, "account.json");
+            if (Account.Valid(account)) return true;
+            var pending = Path.Combine(dataDir, "account.pending.json");
+            var p = Process.Start(new ProcessStartInfo(Paths.Usque, "-c " + Util.Quote(pending) + " register -a")
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = dataDir,
+            });
+            var output = p.StandardOutput.ReadToEndAsync();
+            var errors = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(60000)) p.Kill();
+            bool ok = p.ExitCode == 0 && Account.Valid(pending);
+            r.Check(ok, "registered a new WARP account with usque.exe register -a");
+            if (!ok) { r.Line("info  register output: " + (output.Result + errors.Result).Replace("\n", " | ").Trim()); return false; }
+            File.Move(pending, account);
+            return true;
+        }
 
         public static int Connect(string dataDir, string outFile)
         {
             var r = new Report(outFile);
             dataDir = dataDir ?? Path.Combine(Path.GetTempPath(), "warp-switch-connect-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dataDir);
-            var usque = Paths.Usque;
             r.Line("info  data: " + dataDir);
-            r.Line("info  usque: " + usque);
+            const int mask = WinInet.Direct | WinInet.Proxy | WinInet.AutoProxyUrl | WinInet.AutoDetect;
             try
             {
-                var account = Path.Combine(dataDir, "account.json");
-                if (!Account.Valid(account))
-                {
-                    var pending = Path.Combine(dataDir, "account.pending.json");
-                    var p = Process.Start(new ProcessStartInfo(usque, "-c " + Util.Quote(pending) + " register -a")
-                    {
-                        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = dataDir,
-                    });
-                    var output = p.StandardOutput.ReadToEndAsync();
-                    var errors = p.StandardError.ReadToEndAsync();
-                    if (!p.WaitForExit(60000)) { p.Kill(); }
-                    r.Line("info  register output: " + (output.Result + errors.Result).Replace("\n", " | ").Trim());
-                    bool ok = p.ExitCode == 0 && Account.Valid(pending);
-                    r.Check(ok, "registered a new WARP account with usque.exe");
-                    if (!ok) return r.Done("");
-                    File.Move(pending, account);
-                }
+                if (!Registered(r, dataDir)) return r.Done("");
 
-                foreach (var mode in new[] { "fragment", "compatible" })
-                {
-                    var w = new ConnectionWorker(dataDir, usque, "www.bing.com", mode, fresh: false, testOnly: true);
-                    StateInfo reached = null;
-                    w.StateChanged += s => { r.Line("      [" + s.Phase + "] " + s.Message); if (s.Phase == "on") reached = s; };
-                    int code = w.Run();
-                    // A test run always ends with 已关闭; what matters is that it reached 已连接 on the way.
-                    r.Check(code == 0 && reached != null && reached.Fragmented == (mode == "fragment") && reached.Ip != "—",
-                            (mode == "fragment" ? "握手分片" : "兼容模式") + " reached WARP: entry " + reached?.Endpoint + ", exit IP " + reached?.Ip + ", node " + reached?.Colo);
-                }
+                // 1. usque + sing-box only, the system proxy untouched.
+                var test = new Engine(dataDir, Paths.Usque, Paths.SingBox, "www.cloudflare.com", testOnly: true);
+                StateInfo reached = null;
+                test.StateChanged += s => { r.Line("      [" + s.Phase + "] " + s.Message); if (s.Phase == "on") reached = s; };
+                int code = test.Run();
+                r.Check(code == 0 && reached != null && reached.Ip != "—", "usque --http2 -s www.cloudflare.com + sing-box reached WARP: exit IP " + reached?.Ip + ", node " + reached?.Colo);
 
-                // Full run, as the app does it: system proxy on, real traffic, then off again.
+                // 2. As the app runs it: system proxy on, real traffic, change the 伪装域名 while connected, then off.
                 var before = WinInet.Query();
-                var worker = new ConnectionWorker(dataDir, usque, "www.bing.com", "auto", fresh: false, testOnly: false);
-                worker.StateChanged += s => r.Line("      [" + s.Phase + "] " + s.Message);
+                var engine = new Engine(dataDir, Paths.Usque, Paths.SingBox, "www.cloudflare.com", testOnly: false);
+                string last = "";
+                engine.StateChanged += s => { var line = "[" + s.Phase + "] " + s.Message; if (line != last) { last = line; r.Line("      " + line); } };
                 int exit = -1;
-                var thread = new Thread(() => exit = worker.Run()) { IsBackground = true };
+                var thread = new Thread(() => exit = engine.Run()) { IsBackground = true };
                 thread.Start();
-                var deadline = DateTime.UtcNow.AddMinutes(4);
-                while (DateTime.UtcNow < deadline && thread.IsAlive && worker.Snapshot().Phase != "on") Thread.Sleep(500);
-                bool connected = worker.Snapshot().Phase == "on";
-                r.Check(connected, "app connection reached 已连接");
+                bool Wait(Func<StateInfo, bool> ok, int seconds)
+                {
+                    var until = DateTime.UtcNow.AddSeconds(seconds);
+                    while (DateTime.UtcNow < until && thread.IsAlive) { if (ok(engine.Snapshot())) return true; Thread.Sleep(300); }
+                    return ok(engine.Snapshot());
+                }
+                bool connected = Wait(s => s.Phase == "on", 90);
+                r.Check(connected, "connected (已连接)");
                 if (connected)
                 {
                     var reg = RegistryProxy();
-                    r.Check(reg.Contains("ProxyServer=" + Ports.ProxyAddress), "system proxy set while connected (" + reg + ")");
-                    var trace = ConnectionWorker.Trace(WebRequest.GetSystemWebProxy());
-                    r.Check(trace.TryGetValue("warp", out var warp) && (warp == "on" || warp == "plus"),
-                            "a normal HTTPS request through the system proxy arrives via WARP (warp=" + (warp ?? "?") + ", ip=" + (trace.TryGetValue("ip", out var ip) ? ip : "?") + ")");
+                    r.Check(reg.Contains("ProxyEnable=1") && reg.Contains("ProxyServer=" + Ports.ProxyAddress), "system proxy points at sing-box while connected (" + reg + ")");
+                    r.Check(ViaSystemProxyIsWarp(out var d1), "a normal HTTPS request through the system proxy arrives via WARP (" + d1 + ")");
+
+                    engine.ChangeSni("www.bing.com");
+                    bool again = Wait(s => s.Phase == "on" && s.Sni == "www.bing.com", 90);
+                    var usqueLog = File.Exists(Path.Combine(dataDir, "usque.log")) ? File.ReadAllText(Path.Combine(dataDir, "usque.log")) : "";
+                    r.Check(again && usqueLog.Contains("伪装域名 www.bing.com"), "changed 伪装域名 to www.bing.com while connected: only usque restarted, connected again");
+                    string d2 = "not reconnected";
+                    r.Check(again && ViaSystemProxyIsWarp(out d2), "traffic still goes through WARP after the change (" + d2 + ")");
+                    var still = RegistryProxy();
+                    r.Check(still.Contains("ProxyServer=" + Ports.ProxyAddress), "system proxy stayed on during the change");
                 }
-                worker.Cancel();
+                engine.Cancel();
                 r.Check(thread.Join(30000), "closing finished within 30 seconds");
                 var after = WinInet.Query();
-                const int mask = WinInet.Direct | WinInet.Proxy | WinInet.AutoProxyUrl | WinInet.AutoDetect;
                 r.Check((after.Flags & mask) == (before.Flags & mask) && after.Server == before.Server && !SystemProxy.IsOurs(after.Server),
                         "system proxy restored after closing: " + Describe(after));
 
-                // The app itself: connect, change 伪装域名 while connected, and it reconnects with the new one.
-                var c = new AppController(dataDir, usque);
-                c.Settings.Mode = "auto"; c.Settings.Sni = "www.bing.com";
-                bool Pump(Func<bool> done, int seconds)
-                {
-                    var until = DateTime.UtcNow.AddSeconds(seconds);
-                    while (DateTime.UtcNow < until) { Application.DoEvents(); if (done()) return true; Thread.Sleep(100); }
-                    return done();
-                }
-                string lastSeen = "";
-                c.Changed += () => { var line = "[" + c.State.Phase + "] " + c.State.Message; if (line != lastSeen) { lastSeen = line; r.Line("      " + line); } };
+                // 3. The app's controller, with the domain typed through a Chinese input method.
+                var c = new AppController(dataDir, Paths.Usque, Paths.SingBox);
+                c.Settings.Sni = "www.cloudflare.com";
+                string seen = "";
+                c.Changed += () => { var line = "[" + c.State.Phase + "] " + c.State.Message; if (line != seen) { seen = line; r.Line("      " + line); } };
                 c.UserStart();
-                r.Check(Pump(() => c.State.Phase == "on", 240), "app connected with www.bing.com");
-                var problem = c.ApplyDomain("dock。schoology。com");
-                r.Check(problem == null && c.Settings.Sni == "dock.schoology.com", "changed 伪装域名 while connected (typed with a Chinese full stop)");
-                bool again = Pump(() => c.State.Phase == "on" && c.State.Sni == "dock.schoology.com" && !c.Stopping, 240);
-                r.Check(again, "reconnected by itself using dock.schoology.com (entry " + c.State.Endpoint + ")");
-                if (again)
-                {
-                    var t2 = ConnectionWorker.Trace(WebRequest.GetSystemWebProxy());
-                    r.Check(t2.TryGetValue("warp", out var w2) && (w2 == "on" || w2 == "plus"), "traffic still goes through WARP after the change (warp=" + (w2 ?? "?") + ")");
-                }
+                r.Check(Pump(() => c.State.Phase == "on", 90), "app connected with www.cloudflare.com");
+                var saved = c.ApplySni("dock。schoology。com");
+                r.Check(saved == "dock.schoology.com" && c.Settings.Sni == "dock.schoology.com" && c.Working, "applied 伪装域名 while connected (typed with a Chinese full stop); the connection stays on");
+                bool switched = Pump(() => c.State.Phase == "on" && c.State.Sni == "dock.schoology.com", 90);
+                r.Check(switched, "app reconnected with dock.schoology.com by itself");
+                if (switched) r.Check(ViaSystemProxyIsWarp(out var d3), "traffic goes through WARP with dock.schoology.com (" + d3 + ")");
                 c.UserStop();
                 r.Check(Pump(() => !c.Working, 30), "closed");
                 var end = WinInet.Query();
                 r.Check(!((end.Flags & WinInet.Proxy) != 0 && SystemProxy.IsOurs(end.Server)), "system proxy restored at the end: " + Describe(end));
+                var saveFile = Json.Read<Settings>(Path.Combine(dataDir, "settings.json"));
+                r.Check(saveFile?.Sni == "dock.schoology.com", "the new 伪装域名 is saved for next time");
+                // Leave the default for the UI test that runs next.
+                c.Settings.Sni = Defaults.Sni; c.SaveSettings();
             }
             catch (Exception e) { r.Check(false, "unexpected error: " + e); }
-            return r.Done("registered, connected in both modes, used the system proxy, changed the domain while connected, and restored the proxy");
+            return r.Done("registered, connected through usque --http2 + sing-box, used the system proxy, changed the 伪装域名 while connected, and restored the proxy");
+        }
+
+        // ---------- 网络诊断 on the build machine (its network does not block WARP) ----------
+
+        public static int Diagnose(string dataDir, string outFile)
+        {
+            var r = new Report(outFile);
+            try
+            {
+                dataDir = dataDir ?? Path.Combine(Path.GetTempPath(), "warp-switch-diag-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(dataDir);
+                if (!Registered(r, dataDir)) return r.Done("");
+                var started = DateTime.UtcNow;
+                var report = new Diagnostics(dataDir, Paths.Usque, "dock.schoology.com", line => r.Line("    | " + line)).Run();
+                r.Line("info  took " + (int)(DateTime.UtcNow - started).TotalSeconds + " s");
+                r.Check(report.DirectOk, "direct HTTPS check works");
+                r.Check(report.MasqueTcpOk, "TCP 443 to the WARP entry is open");
+                r.Check(report.CloudflareSniOk, "TLS handshake with SNI www.cloudflare.com completes");
+                r.Check(report.Snis.Count == 1 + Defaults.SniCandidates.Length, "tested the current 伪装域名 and every candidate (" + report.Snis.Count + ")");
+                r.Check(report.Snis.Any(s => s.Sni == "www.cloudflare.com" && s.Works), "usque really connected with www.cloudflare.com");
+                r.Check(report.BestSni != null && report.Summary.Length > 0, "a working 伪装域名 is suggested: " + report.Summary);
+                r.Check(File.Exists(Path.Combine(dataDir, "diagnose.txt")), "diagnose.txt saved");
+                r.Check(!Directory.GetFiles(dataDir, "diagnose-usque-*.log").Any() && !Process.GetProcessesByName("usque").Any(), "temporary usque processes and logs cleaned up");
+            }
+            catch (Exception e) { r.Check(false, "unexpected error: " + e); }
+            return r.Done("网络诊断 checked the network and found a working 伪装域名 with real usque connections");
         }
 
         // ---------- Screenshots of the window in each state ----------
@@ -359,7 +336,7 @@ namespace WarpSwitchNext
             Directory.CreateDirectory(data);
             try
             {
-                var controller = new AppController(data, Paths.Usque);
+                var controller = new AppController(data, Paths.Usque, Paths.SingBox);
                 using (var form = new MainForm(controller))
                 {
                     form.StartPosition = FormStartPosition.Manual;
@@ -371,9 +348,9 @@ namespace WarpSwitchNext
                     {
                         ("1-first-run", new StateInfo(), true, false, false),
                         ("2-registering", new StateInfo { Phase = "registering", Message = "正在创建你的独立免费 WARP 账号…" }, true, true, false),
-                        ("3-connecting", new StateInfo { Phase = "connecting", Message = "正在尝试入口 2/8 · 握手分片", Endpoint = "162.159.198.4", Sni = "www.bing.com" }, false, true, true),
-                        ("4-connected", new StateInfo { Phase = "on", Message = "已连接 · 浏览器及使用系统代理的程序可用", Endpoint = "162.159.198.4", Sni = "www.bing.com", Ip = "104.28.203.89", Colo = "IAD", Fragmented = true }, false, true, true),
-                        ("5-error", new StateInfo { Phase = "error", Message = "这些入口暂时无法通过验证。可换一个伪装域名或点“换入口重试”。" }, false, false, true),
+                        ("3-connecting", new StateInfo { Phase = "connecting", Message = "正在通过 HTTP/2 连接 WARP（伪装域名 www.cloudflare.com）…", Sni = "www.cloudflare.com" }, false, true, true),
+                        ("4-connected", new StateInfo { Phase = "on", Message = "已连接 · 浏览器和使用系统代理的程序都会经过 WARP", Sni = "www.cloudflare.com", Ip = "104.28.203.89", Colo = "IAD" }, false, true, true),
+                        ("5-error", new StateInfo { Phase = "error", Message = "用伪装域名 www.cloudflare.com 连不上 WARP。点「网络诊断」可以查出学校封了什么、换哪个域名能用。\n（usque：Failed to connect tunnel: connection reset）" }, false, false, true),
                         ("6-off", new StateInfo { Message = "已关闭，系统代理已恢复" }, false, false, false),
                     };
                     foreach (var scene in scenes)

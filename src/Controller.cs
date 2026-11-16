@@ -10,14 +10,14 @@ namespace WarpSwitchNext
 {
     /// <summary>
     /// Everything the window and tray show and do. Lives on the UI thread; the connection itself
-    /// runs in a ConnectionWorker on a background thread.
+    /// runs in an Engine (usque + sing-box) on a background thread.
     /// </summary>
     sealed class AppController
     {
         public event Action Changed;
 
         public readonly string DataDir;
-        readonly string usque;
+        readonly string usque, singBox;
         readonly SynchronizationContext ui;
         readonly System.Windows.Forms.Timer retryTimer = new System.Windows.Forms.Timer();
 
@@ -27,7 +27,7 @@ namespace WarpSwitchNext
         /// <summary>Set when the user presses 关闭, so auto-connect never reconnects against their wish.</summary>
         public bool UserStopped;
 
-        ConnectionWorker worker;
+        Engine worker;
         Process registration;
         LogFile registrationLog;
         bool registrationCancelled;
@@ -38,14 +38,15 @@ namespace WarpSwitchNext
         string AccountPath => Path.Combine(DataDir, "account.json");
         string PendingPath => Path.Combine(DataDir, "account.pending.json");
 
-        public AppController(string dataDirectory, string usquePath)
+        public AppController(string dataDirectory, string usquePath, string singBoxPath)
         {
             DataDir = dataDirectory;
             usque = usquePath;
+            singBox = singBoxPath;
             ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             Directory.CreateDirectory(DataDir);
             Settings = Json.Read<Settings>(SettingsPath) ?? new Settings();
-            if (!Util.ValidDomain(Settings.Sni)) Settings.Sni = "www.bing.com";
+            if (!Util.ValidDomain(Settings.Sni)) Settings.Sni = Defaults.Sni;
             NeedsSetup = !Account.Valid(AccountPath);
             // Put the proxy back if the app or PC stopped while connected.
             try { new SystemProxy(DataDir).Restore(); }
@@ -110,44 +111,53 @@ namespace WarpSwitchNext
         }
 
         public void UserStart() { UserStopped = false; retryDelay = 30; Start(); }
+        public string SingBoxPath => singBox;
+        public string UsquePath => usque;
         public void UserStop() { UserStopped = true; retryTimer.Stop(); Stop(null); }
 
         public void Retry()
         {
             UserStopped = false; retryTimer.Stop();
-            if (Working) Stop(() => Start(true)); else Start(true);
+            if (Working) Stop(() => Start()); else Start();
         }
 
         /// <summary>
-        /// Applies a changed connection setting. While connecting or connected, reconnects with it right
-        /// away; otherwise the setting stays locked behind a connection that may never succeed with it.
+        /// Saves a new 伪装域名, at any time. While connecting or connected only usque restarts with it
+        /// (the proxy stays on); while registering it is used once the account is ready.
+        /// Returns the domain as saved, or a UserError explaining what is wrong.
         /// </summary>
-        void ReconnectForNewSetting()
-        {
-            if (!Working || Registering) return; // registration finishes and then connects with the new setting
-            UserStopped = false;
-            retryTimer.Stop();
-            Stop(() => Start());
-        }
-
-        public void SetMode(string mode)
-        {
-            if (mode == Settings.Mode) return;
-            Settings.Mode = mode; SaveSettings();
-            ReconnectForNewSetting();
-            Notify();
-        }
-
-        /// <summary>Saves a new 伪装域名. Returns null when saved, or a message explaining what is wrong.</summary>
-        public string ApplyDomain(string input)
+        public string ApplySni(string input)
         {
             var value = Util.NormalizeDomain(input);
-            if (!Util.ValidDomain(value)) return "“" + (input ?? "").Trim() + "”不是有效的域名。请用英文输入法输入，例如 www.bing.com";
-            if (value == Settings.Sni) return null;
+            if (!Util.ValidDomain(value))
+                throw new UserError("“" + (input ?? "").Trim() + "”不是有效的域名。请用英文字母输入，例如 www.cloudflare.com");
+            bool changed = value != Settings.Sni;
             Settings.Sni = value; SaveSettings();
-            ReconnectForNewSetting();
+            if (changed && worker != null && !Registering && !Stopping)
+            {
+                worker.ChangeSni(value);
+                State = State.Clone();
+                State.Phase = "reconnecting"; State.Message = "正在用新的伪装域名 " + value + " 重新连接…";
+            }
             Notify();
-            return null;
+            return value;
+        }
+
+        public bool Diagnosing;
+
+        /// <summary>Runs 网络诊断 on a background thread; lines arrive on the UI thread.</summary>
+        public void Diagnose(Action<string> line, Action<Diagnostics.Report> done)
+        {
+            if (Diagnosing) return;
+            Diagnosing = true; Notify();
+            var sni = Settings.Sni;
+            new Thread(() =>
+            {
+                Diagnostics.Report report = null;
+                try { report = new Diagnostics(DataDir, usque, sni, l => Post(() => line(l))).Run(); }
+                catch (Exception e) { Post(() => line("诊断出错：" + e.Message)); }
+                Post(() => { Diagnosing = false; Notify(); done(report); });
+            }) { IsBackground = true, Name = "Diagnostics" }.Start();
         }
 
         public void SetAutoConnect(bool on)
@@ -165,29 +175,15 @@ namespace WarpSwitchNext
             Notify();
         }
 
-        public void EditDomain(IWin32Window owner)
-        {
-            var text = Settings.Sni;
-            while (true)
-            {
-                text = Dialogs.AskDomain(owner, text, connected: Working && !Registering);
-                if (text == null) return; // cancelled
-                var problem = ApplyDomain(text);
-                if (problem == null) return;
-                MessageBox.Show(owner, problem, "WARP 新开关", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                // Reopen with what they typed, so a small mistake doesn't mean starting over.
-            }
-        }
-
-        public void Start(bool fresh = false)
+        public void Start()
         {
             if (Working || Stopping) return;
-            var sni = (Settings.Sni ?? "").Trim().ToLowerInvariant();
-            if (!Util.ValidDomain(sni)) { State = new StateInfo { Phase = "error", Message = "请输入有效的域名，例如 www.bing.com" }; Notify(); return; }
+            var sni = Util.NormalizeDomain(Settings.Sni);
+            if (!Util.ValidDomain(sni)) { State = new StateInfo { Phase = "error", Message = "请先填写有效的伪装域名，例如 www.cloudflare.com" }; Notify(); return; }
             Settings.Sni = sni; SaveSettings();
-            if (NeedsSetup) { Register(fresh); return; }
+            if (NeedsSetup) { Register(); return; }
 
-            var w = new ConnectionWorker(DataDir, usque, sni, Settings.Mode, fresh, testOnly: false);
+            var w = new Engine(DataDir, usque, singBox, sni, testOnly: false);
             w.StateChanged += s => Post(() =>
             {
                 if (worker != w) return;
@@ -197,16 +193,16 @@ namespace WarpSwitchNext
             });
             worker = w;
             Working = true;
-            State = new StateInfo { Phase = "connecting", Message = "正在寻找不同的 WARP 入口…" };
+            State = new StateInfo { Phase = "connecting", Message = "正在连接 WARP（伪装域名 " + sni + "）…", Sni = sni };
             new Thread(() =>
             {
                 try { w.Run(); } catch { }
                 Post(() => Completed(w));
-            }) { IsBackground = true, Name = "ConnectionWorker" }.Start();
+            }) { IsBackground = true, Name = "Engine" }.Start();
             Notify();
         }
 
-        void Completed(ConnectionWorker w)
+        void Completed(Engine w)
         {
             if (worker != w) return;
             State = w.Snapshot();
@@ -258,7 +254,7 @@ namespace WarpSwitchNext
             try { new SystemProxy(DataDir).Restore(); } catch { }
         }
 
-        void Register(bool fresh)
+        void Register()
         {
             if (!File.Exists(usque))
             {
@@ -283,7 +279,7 @@ namespace WarpSwitchNext
             var log = registrationLog;
             p.OutputDataReceived += (s, e) => log.Line(e.Data);
             p.ErrorDataReceived += (s, e) => log.Line(e.Data);
-            p.Exited += (s, e) => Post(() => FinishRegistration(p, fresh));
+            p.Exited += (s, e) => Post(() => FinishRegistration(p));
             try
             {
                 p.Start();
@@ -305,7 +301,7 @@ namespace WarpSwitchNext
             Notify();
         }
 
-        void FinishRegistration(Process p, bool fresh)
+        void FinishRegistration(Process p)
         {
             if (registration != p) return;
             registration = null; Working = false; Stopping = false; Registering = false;
@@ -323,7 +319,7 @@ namespace WarpSwitchNext
                     File.Move(AccountPath, Path.Combine(DataDir, "account.invalid." + Guid.NewGuid().ToString("N") + ".json"));
                 File.Move(PendingPath, AccountPath);
                 NeedsSetup = false;
-                Start(fresh);
+                Start();
             }
             catch (Exception e)
             {
