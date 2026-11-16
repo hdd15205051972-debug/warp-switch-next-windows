@@ -21,6 +21,15 @@ public static class Input {
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, System.Text.StringBuilder l);
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+    // The text of a window or text box (WM_GETTEXT), however long.
+    public static string Text(IntPtr h) {
+        int n = (int)SendMessage(h, 0x000E, IntPtr.Zero, IntPtr.Zero);
+        var sb = new System.Text.StringBuilder(n + 1);
+        SendMessage(h, 0x000D, (IntPtr)(n + 1), sb);
+        return sb.ToString();
+    }
     static void Send(INPUT i) { if (SendInput(1, new[] { i }, Marshal.SizeOf(typeof(INPUT))) != 1) throw new Exception("SendInput failed: " + Marshal.GetLastWin32Error()); }
     public static void Click(int x, int y) {
         SetCursorPos(x, y); System.Threading.Thread.Sleep(80);
@@ -58,38 +67,29 @@ function Shot($name) {
 }
 $AE = [System.Windows.Automation.AutomationElement]
 $Tree = [System.Windows.Automation.TreeScope]
-# Controls are found by their WinForms name (AutomationId) or, if UI Automation doesn't expose it, by what a person sees.
-$Fallback = @{ SniBox = '伪装域名'; ApplySni = '应用伪装域名'; MainButton = '开启或关闭连接'; Diagnose = '网络诊断' }
+# UI Automation sees the WinForms controls as plain Win32 windows (class name + window text),
+# so controls are matched the way a person finds them: by what they show.
 $States = @('已关闭', '已连接', '正在连接', '正在重连', '正在关闭', '正在注册', '暂未连接')
-function Texts($root) {
-    $cond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
-    return @($root.FindAll($Tree::Descendants, $cond))
+$Match = @{
+    SniBox     = { param($c) $c.ClassName -like '*EDIT*' }
+    ApplySni   = { param($c) $c.ClassName -like '*BUTTON*' -and $c.Name -eq '应用' }
+    MainButton = { param($c) @('开启', '关闭', '同意条款并注册', '取消注册') -contains $c.Name -and $c.ClassName -notlike '*STATIC*' }
+    Diagnose   = { param($c) $c.Name -eq '网络诊断' }
+    StateLabel = { param($c) $States -contains $c.Name }
 }
+function All($root) { return @($root.FindAll($Tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) }
 function Find($root, $id) {
-    $byId = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $id)
     for ($i = 0; $i -lt 50; $i++) {
-        $e = $root.FindFirst($Tree::Descendants, $byId)
-        if (-not $e -and $Fallback.ContainsKey($id)) {
-            $byName = New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty, $Fallback[$id])
-            $e = $root.FindFirst($Tree::Descendants, $byName)
-            # A text box's name may come from its label: take the edit control.
-            if ($e -and $id -eq 'SniBox' -and $e.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
-                $edit = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-                $e = $root.FindFirst($Tree::Descendants, $edit)
-            }
-        }
-        if (-not $e -and $id -eq 'StateLabel') { $e = Texts $root | Where-Object { $States -contains $_.Current.Name } | Select-Object -First 1 }
+        $e = All $root | Where-Object { & $Match[$id] $_.Current } | Select-Object -First 1
         if ($e) { return $e }
         Start-Sleep -Milliseconds 200
     }
     Log "info  controls in the window:"
-    foreach ($c in @($root.FindAll($Tree::Descendants, [System.Windows.Automation.Condition]::TrueCondition))) {
-        Log ("      " + $c.Current.ControlType.ProgrammaticName + " id='" + $c.Current.AutomationId + "' name='" + $c.Current.Name + "' class='" + $c.Current.ClassName + "'")
-    }
+    foreach ($c in (All $root)) { Log ("      class='" + $c.Current.ClassName + "' name='" + $c.Current.Name + "'") }
     throw "control $id not found"
 }
 function TextLike($pattern) {
-    $t = Texts $script:window | Where-Object { $_.Current.Name -like $pattern } | Select-Object -First 1
+    $t = All $script:window | Where-Object { $_.Current.Name -like $pattern } | Select-Object -First 1
     if ($t) { return $t.Current.Name } else { return '' }
 }
 function Center($e) {
@@ -97,7 +97,7 @@ function Center($e) {
     return @([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
 }
 function ClickOn($e) { $p = Center $e; [Input]::Click($p[0], $p[1]) }
-function Value($e) { return $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value }
+function Value($e) { return [Input]::Text([IntPtr]$e.Current.NativeWindowHandle) }
 function State() { return (Find $script:window 'StateLabel').Current.Name }
 function WaitFor([scriptblock] $ok, [int] $seconds) {
     $until = (Get-Date).AddSeconds($seconds)
