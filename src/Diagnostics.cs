@@ -84,9 +84,11 @@ namespace WarpSwitchNext
             foreach (var sni in handshakeSnis)
             {
                 var error = Handshake(MasqueIp, sni, 6000);
-                if (sni == DefaultSni) report.DefaultSniOk = error == null;
-                if (sni == "www.cloudflare.com") report.CloudflareSniOk = error == null;
-                Say("   SNI=" + sni + (error == null ? "  握手成功" : "  握手失败/被重置（" + error + "）"));
+                // A TLS alert still came from Cloudflare's server, so the network let the SNI through.
+                bool reached = error == null || error.StartsWith("服务器拒绝");
+                if (sni == DefaultSni) report.DefaultSniOk = reached;
+                if (sni == "www.cloudflare.com") report.CloudflareSniOk = reached;
+                Say("   SNI=" + sni + (error == null ? "  握手成功" : reached ? "  服务器有回应（" + error + "），没被网络拦截" : "  握手失败/被重置（" + error + "）  ← 按 SNI 封锁"));
             }
 
             Say("4. 用 usque 实际连接 WARP（HTTP/2，每个伪装域名单独测试，最多约 20 秒）");
@@ -187,7 +189,12 @@ namespace WarpSwitchNext
             catch { return false; }
         }
 
-        /// <summary>A TLS handshake with the given SNI; null when it completes, otherwise a short reason.</summary>
+        /// <summary>
+        /// A TLS handshake with the given SNI, the way curl in the reference project does it (SNI plus
+        /// ALPN h2, TLS 1.3). .NET Framework cannot send ALPN, and WARP's entry refuses a handshake
+        /// without it, so the ClientHello is written here. Returns null when the server answers with a
+        /// ServerHello (nothing in the network stopped it), otherwise a short reason.
+        /// </summary>
         public static string Handshake(string ip, string sni, int timeoutMs)
         {
             try
@@ -196,16 +203,58 @@ namespace WarpSwitchNext
                 {
                     if (!client.ConnectAsync(ip, 443).Wait(timeoutMs)) return "TCP 超时";
                     client.ReceiveTimeout = timeoutMs; client.SendTimeout = timeoutMs;
-                    using (var ssl = new SslStream(client.GetStream(), false, (s, c, ch, e) => true))
-                    {
-                        var auth = ssl.AuthenticateAsClientAsync(sni, null, SslProtocols.Tls12, false);
-                        if (!auth.Wait(timeoutMs)) return "超时";
-                        return null;
-                    }
+                    var s = client.GetStream();
+                    var hello = ClientHello(sni);
+                    s.Write(hello, 0, hello.Length);
+                    var head = ReadExactly(s, 5);
+                    var body = ReadExactly(s, Math.Min(head[3] * 256 + head[4], 16384));
+                    if (head[0] == 22 && body.Length > 0 && body[0] == 2) return null;  // ServerHello
+                    if (head[0] == 21) return "服务器拒绝（TLS 警报 " + (body.Length > 1 ? body[1].ToString() : "?") + "）";
+                    return "意外的回应";
                 }
             }
             catch (AggregateException e) { return Short(e.InnerException ?? e); }
             catch (Exception e) { return Short(e); }
+        }
+
+        /// <summary>A TLS 1.3 ClientHello (also offering 1.2) with SNI and ALPN h2 / http/1.1.</summary>
+        public static byte[] ClientHello(string sni)
+        {
+            var rng = new Random();
+            byte[] Random(int n) { var b = new byte[n]; rng.NextBytes(b); return b; }
+            List<byte> U16(int v) => new List<byte> { (byte)(v >> 8), (byte)v };
+            List<byte> Ext(int type, List<byte> data) { var e = U16(type); e.AddRange(U16(data.Count)); e.AddRange(data); return e; }
+            List<byte> Vec16(List<byte> data) { var v = U16(data.Count); v.AddRange(data); return v; }
+
+            var name = Encoding.ASCII.GetBytes(sni);
+            var serverName = new List<byte> { 0 }; serverName.AddRange(U16(name.Length)); serverName.AddRange(name);
+            var alpn = new List<byte>();
+            foreach (var proto in new[] { "h2", "http/1.1" }) { alpn.Add((byte)proto.Length); alpn.AddRange(Encoding.ASCII.GetBytes(proto)); }
+            var keyShare = U16(0x001d); keyShare.AddRange(U16(32)); keyShare.AddRange(Random(32));
+
+            var ext = new List<byte>();
+            ext.AddRange(Ext(0x0000, Vec16(serverName)));                                         // server_name
+            ext.AddRange(Ext(0x000a, Vec16(new List<byte> { 0, 0x1d, 0, 0x17, 0, 0x18 })));       // supported_groups
+            ext.AddRange(Ext(0x000b, new List<byte> { 1, 0 }));                                    // ec_point_formats
+            ext.AddRange(Ext(0x000d, Vec16(new List<byte> { 4, 3, 8, 4, 4, 1, 5, 3, 8, 5, 5, 1, 8, 6, 6, 1 }))); // signature_algorithms
+            ext.AddRange(Ext(0x0010, Vec16(alpn)));                                                // ALPN
+            ext.AddRange(Ext(0x002b, new List<byte> { 4, 3, 4, 3, 3 }));                           // supported_versions 1.3, 1.2
+            ext.AddRange(Ext(0x002d, new List<byte> { 1, 1 }));                                    // psk_key_exchange_modes
+            ext.AddRange(Ext(0x0033, Vec16(keyShare)));                                            // key_share x25519
+
+            var hello = new List<byte> { 3, 3 };
+            hello.AddRange(Random(32));
+            hello.Add(32); hello.AddRange(Random(32));                                             // session id
+            hello.AddRange(Vec16(new List<byte> { 0x13, 1, 0x13, 2, 0x13, 3, 0xc0, 0x2b, 0xc0, 0x2f, 0xc0, 0x2c, 0xc0, 0x30, 0xcc, 0xa9, 0xcc, 0xa8 }));
+            hello.Add(1); hello.Add(0);                                                            // compression: none
+            hello.AddRange(Vec16(ext));
+
+            var handshake = new List<byte> { 1, 0, (byte)(hello.Count >> 8), (byte)hello.Count };
+            handshake.AddRange(hello);
+            var record = new List<byte> { 22, 3, 1 };
+            record.AddRange(U16(handshake.Count));
+            record.AddRange(handshake);
+            return record.ToArray();
         }
 
         static string Short(Exception e)

@@ -80,7 +80,6 @@ jobs:
         id: ui
         continue-on-error: true
         timeout-minutes: 10
-        shell: powershell
         run: |
           $exe = (Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe').Path
           $data = Join-Path $env:RUNNER_TEMP 'warpdata'
