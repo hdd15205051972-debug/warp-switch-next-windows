@@ -184,7 +184,7 @@ try {
         }
         Check ($null -ne $diag) "clicked 网络诊断 -> window opened"
         if ($diag) {
-x
+            $text = Find $diag 'SniBox'   # the diagnostics window's only text box
             $done = WaitFor { (Value $text) -match '结论' } 90
             $result = (Value $text) -split "`r`n" | Where-Object { $_ -match '结论|✅|❌' }
             $result | ForEach-Object { Log "    | $_" }
