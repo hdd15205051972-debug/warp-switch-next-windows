@@ -336,7 +336,9 @@ namespace WarpSwitchNext
                 r.Check(report.Snis.Any(s => s.Sni == "www.cloudflare.com" && s.Works && s.Route.Endpoint == null), "usque really connected with www.cloudflare.com on the default entry");
                 r.Check(report.BestSni != null && report.Summary.Length > 0, "a working 伪装域名 is suggested: " + report.Summary);
                 r.Check(File.Exists(Path.Combine(dataDir, "diagnose.txt")), "diagnose.txt saved");
-                r.Check(!Directory.GetFiles(dataDir, "diagnose-*").Any() && !Process.GetProcessesByName("usque").Any(), "temporary usque processes and logs cleaned up");
+                var left = Directory.GetFiles(dataDir, "diagnose-*").Select(Path.GetFileName).ToList();
+                var running = Process.GetProcessesByName("usque").Length;
+                r.Check(left.Count == 0 && running == 0, "temporary usque processes and files cleaned up" + (left.Count + running > 0 ? " (left: " + string.Join(", ", left) + "; usque running: " + running + ")" : ""));
             }
             catch (Exception e) { r.Check(false, "unexpected error: " + e); }
             return r.Done("网络诊断 checked the network and found a working 伪装域名 with real usque connections");

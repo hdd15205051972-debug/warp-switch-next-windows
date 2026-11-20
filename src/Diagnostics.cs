@@ -149,7 +149,7 @@ namespace WarpSwitchNext
             }
             if (best != null)
             {
-                var also = string.Join("、", report.Snis.Where(s => s.Works && s.Sni != best).Select(s => s.Sni));
+                var also = string.Join("、", report.Snis.Where(s => s.Works && s.Sni != best).Select(s => s.Sni).Distinct());
                 if (best == currentSni)
                     return "当前伪装域名 " + best + " 在这个网络上能连上 WARP，可以直接开启。" + (also.Length > 0 ? "其他可用：" + also + "。" : "");
                 return "当前伪装域名 " + currentSni + " 连不上，但 " + best + " 可以。点「使用 " + best + "」即可换成它。" + (also.Length > 0 ? "其他可用：" + also + "。" : "");
@@ -338,6 +338,7 @@ namespace WarpSwitchNext
             finally
             {
                 try { if (p != null && !p.HasExited) { p.Kill(); p.WaitForExit(3000); } } catch { }
+                try { p?.WaitForExit(); } catch { } // let the last output lines arrive before the log is deleted
                 try { p?.Dispose(); } catch { }
                 try { relay?.Stop(); } catch { }
                 Thread.Sleep(200);
