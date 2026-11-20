@@ -352,7 +352,7 @@ namespace WarpSwitchNext
             Walk(form);
             foreach (var c in all)
             {
-                if (c is Label label && !(c is LinkLabel) && !string.IsNullOrEmpty(label.Text) && !label.AutoEllipsis)
+                if (c is Label label && !(c is LinkLabel) && !string.IsNullOrEmpty(label.Text))
                 {
                     var need = TextRenderer.MeasureText(label.Text, label.Font, new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
                     if (need.Height > label.Height + 1 || need.Width > label.Width + 1)
@@ -398,7 +398,7 @@ namespace WarpSwitchNext
                         ("2-registering", new StateInfo { Phase = "registering", Message = "正在创建你的独立免费 WARP 账号…" }, true, true, false),
                         ("3-connecting", new StateInfo { Phase = "connecting", Message = "正在尝试连接方式 3/17：备用入口 162.159.198.4 · 握手分片（伪装域名 dock.schoology.com）", Sni = "dock.schoology.com" }, false, true, true),
                         ("4-connected", new StateInfo { Phase = "on", Message = "已连接 · 备用入口 162.159.198.4 · 握手分片", Sni = "dock.schoology.com", Ip = "2a09:bac5:9f23:2828::400:3d", Colo = "IAD", Route = "备用入口 162.159.198.4 · 握手分片" }, false, true, true),
-                        ("5-error", new StateInfo { Phase = "error", Message = "用伪装域名 dock.schoology.com 试遍了所有连接方式（默认入口、8 个备用入口、握手分片）都连不上。点「网络诊断」查原因，或换一个伪装域名。", Detail = "2026/11/19 13:10:07 EST Failed to connect tunnel: failed to dial connect-ip over HTTP/2: connect-ip: failed to send request: Connect \"https://162.159.198.2/\": read tcp 10.0.0.5:51234->162.159.198.2:443: wsarecv: An existing connection was forcibly closed by the remote host." }, false, false, true),
+                        ("5-error", new StateInfo { Phase = "error", Message = "用 dock.schoology.com 试了全部 17 种连接方式都连不上。点「网络诊断」查原因。", Detail = "2026/11/19 13:10:07 EST Failed to connect tunnel: failed to dial connect-ip over HTTP/2: connect-ip: failed to send request: Connect \"https://162.159.198.2/\": read tcp 10.0.0.5:51234->162.159.198.2:443: wsarecv: An existing connection was forcibly closed by the remote host." }, false, false, true),
                         ("6-off", new StateInfo { Message = "已关闭，系统代理已恢复" }, false, false, false),
                     };
                     foreach (var scene in scenes)

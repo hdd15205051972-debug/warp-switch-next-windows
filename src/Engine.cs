@@ -322,7 +322,7 @@ namespace WarpSwitchNext
         {
             var why = LastUsqueError(usqueLog.FilePath) ?? lastError;
             lock (stateLock) state.Detail = why;
-            return "用伪装域名 " + sni + " 试遍了所有连接方式（默认入口、" + Route.Entries.Length + " 个备用入口、握手分片）都连不上。点「网络诊断」查原因，或换一个伪装域名。";
+            return "用 " + sni + " 试了全部 " + (1 + 2 * Route.Entries.Length) + " 种连接方式都连不上。点「网络诊断」查原因。";
         }
 
         public int Run()

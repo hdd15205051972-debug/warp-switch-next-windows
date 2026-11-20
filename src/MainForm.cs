@@ -62,13 +62,8 @@ namespace WarpSwitchNext
             messageLabel.AutoEllipsis = true;
             // The full usque error is too long for the window: shown on request, and copied.
             detailLink.Name = "DetailLink";
-            detailLink.Text = "错误详情";
-            detailLink.Bounds = new Rectangle(160, 256, 100, 18);
-            detailLink.TextAlign = ContentAlignment.MiddleCenter;
-            detailLink.Font = Ui.Font(8f);
-            detailLink.LinkBehavior = LinkBehavior.HoverUnderline;
+            Link(detailLink, "错误详情", new Rectangle(24, 256, 372, 18), ContentAlignment.MiddleCenter, ShowDetail);
             detailLink.Visible = false;
-            detailLink.LinkClicked += (s, e) => ShowDetail();
 
             // 伪装域名: a plain text box that is always editable, and an 应用 button.
             var sniLabel = new Label { Text = "伪装域名（TLS 握手里显示的域名）", Bounds = new Rectangle(24, 276, 372, 20), ForeColor = Palette.Secondary };
@@ -242,7 +237,8 @@ namespace WarpSwitchNext
             var size = link.PreferredSize;
             // Laid out at 96 DPI like everything else (scaled later), so measure in 96-DPI units too.
             int w = (int)Math.Ceiling(size.Width / Ui.Scale), h = (int)Math.Ceiling(size.Height / Ui.Scale);
-            link.Location = new Point(align == ContentAlignment.MiddleRight ? bounds.Right - w : bounds.Left, bounds.Top + (bounds.Height - h) / 2);
+            int x = align == ContentAlignment.MiddleRight ? bounds.Right - w : align == ContentAlignment.MiddleCenter ? bounds.Left + (bounds.Width - w) / 2 : bounds.Left;
+            link.Location = new Point(x, bounds.Top + (bounds.Height - h) / 2);
             link.LinkBehavior = LinkBehavior.HoverUnderline;
             link.LinkClicked += (s, e) => action();
         }

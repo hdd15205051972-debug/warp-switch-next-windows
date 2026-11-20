@@ -66,7 +66,8 @@ namespace WarpSwitchNext
             foreach (Control c in parent.Controls)
             {
                 var b = c.Bounds;
-                if (c.AutoSize) c.Location = new Point(S(b.X), S(b.Y));
+                // Text boxes report AutoSize (for their height) but must still get wider.
+                if (c.AutoSize && !(c is TextBoxBase)) c.Location = new Point(S(b.X), S(b.Y));
                 else c.Bounds = R(b.X, b.Y, b.Width, b.Height);
                 if (!(c is TextBoxBase)) ScaleChildren(c);
             }
