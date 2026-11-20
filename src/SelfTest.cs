@@ -352,7 +352,8 @@ namespace WarpSwitchNext
             Walk(form);
             foreach (var c in all)
             {
-                if (c is Label label && !(c is LinkLabel) && !string.IsNullOrEmpty(label.Text))
+                // One-line values end in "…" by design; the status message must fit completely.
+                if (c is Label label && !(c is LinkLabel) && !string.IsNullOrEmpty(label.Text) && (!label.AutoEllipsis || label.Name == "MessageLabel"))
                 {
                     var need = TextRenderer.MeasureText(label.Text, label.Font, new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
                     if (need.Height > label.Height + 1 || need.Width > label.Width + 1)
@@ -365,6 +366,11 @@ namespace WarpSwitchNext
                     var need = TextRenderer.MeasureText(button.Text, button.Font);
                     if (need.Height > button.Height || need.Width > button.Width) yield return "button text does not fit: " + button.Text;
                 }
+            }
+            foreach (var c in all.OfType<Label>().Where(l => l.AutoEllipsis && l.Name != "MessageLabel" && !string.IsNullOrEmpty(l.Text)))
+            {
+                var need = TextRenderer.MeasureText(c.Text, c.Font);
+                if (need.Height > c.Height + 1) yield return "text taller than its row: '" + c.Text + "'";
             }
             foreach (var a in all)
                 foreach (var b in all)

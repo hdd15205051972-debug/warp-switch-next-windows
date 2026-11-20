@@ -62,7 +62,7 @@ namespace WarpSwitchNext
             messageLabel.AutoEllipsis = true;
             // The full usque error is too long for the window: shown on request, and copied.
             detailLink.Name = "DetailLink";
-            Link(detailLink, "错误详情", new Rectangle(24, 256, 372, 18), ContentAlignment.MiddleCenter, ShowDetail);
+            Link(detailLink, "错误详情", new Rectangle(24, 257, 372, 18), ContentAlignment.MiddleCenter, ShowDetail, padding: 0);
             detailLink.Visible = false;
 
             // 伪装域名: a plain text box that is always editable, and an 应用 button.
@@ -96,6 +96,7 @@ namespace WarpSwitchNext
             AddRow(0, "出口 IP", ipValue);
             AddRow(1, "节点", coloValue);
             AddRow(2, "连接方式", routeValue);
+            routeValue.Font = Ui.Font(9f); // Chinese text: Consolas has no Chinese letters
             ipValue.Name = "IpValue";
 
             // Auto-connect
@@ -227,18 +228,18 @@ namespace WarpSwitchNext
             info.Controls.Add(value);
         }
 
-        static void Link(LinkLabel link, string text, Rectangle bounds, ContentAlignment align, Action action)
+        static void Link(LinkLabel link, string text, Rectangle bounds, ContentAlignment align, Action action, int padding = 3)
         {
             link.Text = text;
             // Exactly as wide as its text, so a click anywhere on the link opens it.
             link.Font = Ui.Font(9f); // measure with the window's font
             link.AutoSize = true;
-            link.Padding = new Padding(0, 3, 0, 3);
+            link.Padding = new Padding(0, padding, 0, padding);
             var size = link.PreferredSize;
             // Laid out at 96 DPI like everything else (scaled later), so measure in 96-DPI units too.
             int w = (int)Math.Ceiling(size.Width / Ui.Scale), h = (int)Math.Ceiling(size.Height / Ui.Scale);
             int x = align == ContentAlignment.MiddleRight ? bounds.Right - w : align == ContentAlignment.MiddleCenter ? bounds.Left + (bounds.Width - w) / 2 : bounds.Left;
-            link.Location = new Point(x, bounds.Top + (bounds.Height - h) / 2);
+            link.Location = new Point(x, bounds.Top + Math.Max(0, (bounds.Height - h) / 2));
             link.LinkBehavior = LinkBehavior.HoverUnderline;
             link.LinkClicked += (s, e) => action();
         }
