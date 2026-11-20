@@ -27,6 +27,8 @@ namespace WarpSwitchNext
         /// <summary>usque's local SOCKS5 port; sing-box forwards to it.</summary>
         public const int Socks = 1080;
         public const string ProxyAddress = "127.0.0.1:7890";
+        /// <summary>Local relay to a backup WARP entry (as in the Mac app).</summary>
+        public const int Relay = 18443;
     }
 
     static class Paths

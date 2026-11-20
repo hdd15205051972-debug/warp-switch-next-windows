@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-$Version = '2.0.0'
+$Version = '2.1.0'
 $AppName = 'WARP 新开关'
 
 & ./fetch-deps.ps1

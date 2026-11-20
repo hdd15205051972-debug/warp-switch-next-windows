@@ -12,11 +12,13 @@ namespace WarpSwitchNext
 
         readonly StatusRing ring = new StatusRing();
         readonly Label stateLabel = new Label(), messageLabel = new Label();
+        readonly LinkLabel detailLink = new LinkLabel();
+        readonly Panel content = new Panel();
         readonly TextBox sniBox = new TextBox();
         readonly Button applyButton = new Button();
         readonly Label sniHint = new Label();
         readonly InfoPanel info = new InfoPanel();
-        readonly Label ipValue = new Label(), coloValue = new Label(), proxyValue = new Label();
+        readonly Label ipValue = new Label(), coloValue = new Label(), routeValue = new Label();
         readonly ToggleSwitch autoSwitch = new ToggleSwitch();
         readonly PillButton mainButton = new PillButton();
         readonly LinkLabel diagnoseLink = new LinkLabel(), logLink = new LinkLabel(), exitLink = new LinkLabel();
@@ -31,20 +33,18 @@ namespace WarpSwitchNext
         {
             c = controller;
             SuspendLayout();
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleMode = AutoScaleMode.None; // scaled explicitly below (Ui.Scale), the same at every DPI
             Text = "WARP 新开关";
             Name = "MainWindow";
             Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(420, 672);
             BackColor = Palette.Window;
             Font = Ui.Font(9f);
 
             // Header
-            var logo = new PictureBox { Bounds = new Rectangle(24, 22, 48, 48), SizeMode = PictureBoxSizeMode.Zoom, Image = Ui.AppImage(48) };
+            var logo = new PictureBox { Bounds = new Rectangle(24, 22, 48, 48), SizeMode = PictureBoxSizeMode.Zoom, Image = Ui.AppImage(Ui.S(48)) };
             var title = new Label { Text = "WARP 新开关", Bounds = new Rectangle(82, 20, 300, 30), Font = Ui.Font(15f, FontStyle.Bold), ForeColor = Palette.Text };
             var subtitle = new Label { Text = "MASQUE over HTTP/2 · 伪装域名", Bounds = new Rectangle(84, 50, 300, 20), ForeColor = Palette.Secondary };
 
@@ -56,9 +56,19 @@ namespace WarpSwitchNext
             stateLabel.Font = Ui.Font(17f, FontStyle.Bold);
             stateLabel.ForeColor = Palette.Text;
             messageLabel.Name = "MessageLabel";
-            messageLabel.Bounds = new Rectangle(24, 219, 372, 52);
+            messageLabel.Bounds = new Rectangle(24, 218, 372, 38);
             messageLabel.TextAlign = ContentAlignment.TopCenter;
             messageLabel.ForeColor = Palette.Secondary;
+            messageLabel.AutoEllipsis = true;
+            // The full usque error is too long for the window: shown on request, and copied.
+            detailLink.Name = "DetailLink";
+            detailLink.Text = "错误详情";
+            detailLink.Bounds = new Rectangle(160, 256, 100, 18);
+            detailLink.TextAlign = ContentAlignment.MiddleCenter;
+            detailLink.Font = Ui.Font(8f);
+            detailLink.LinkBehavior = LinkBehavior.HoverUnderline;
+            detailLink.Visible = false;
+            detailLink.LinkClicked += (s, e) => ShowDetail();
 
             // 伪装域名: a plain text box that is always editable, and an 应用 button.
             var sniLabel = new Label { Text = "伪装域名（TLS 握手里显示的域名）", Bounds = new Rectangle(24, 276, 372, 20), ForeColor = Palette.Secondary };
@@ -90,7 +100,7 @@ namespace WarpSwitchNext
             info.Rows = 3;
             AddRow(0, "出口 IP", ipValue);
             AddRow(1, "节点", coloValue);
-            AddRow(2, "本机代理", proxyValue);
+            AddRow(2, "连接方式", routeValue);
             ipValue.Name = "IpValue";
 
             // Auto-connect
@@ -126,18 +136,46 @@ namespace WarpSwitchNext
             termsLink.LinkBehavior = LinkBehavior.HoverUnderline;
             termsLink.LinkClicked += (s, e) => Util.OpenUrl("https://www.cloudflare.com/terms/");
 
-            Controls.AddRange(new Control[]
+            content.Controls.AddRange(new Control[]
             {
-                logo, title, subtitle, ring, stateLabel, messageLabel,
+                logo, title, subtitle, ring, stateLabel, messageLabel, detailLink,
                 sniLabel, sniBox, applyButton, sniHint, info,
                 autoLabel, autoCaption, autoSwitch, mainButton,
                 diagnoseLink, logLink, exitLink, footer, termsLink,
             });
             mainButton.TabIndex = 0; sniBox.TabIndex = 1; applyButton.TabIndex = 2;
+
+            // Everything is laid out at 96 DPI and scaled here. If the window would not fit on the
+            // screen (high scaling on a small screen) it scrolls instead of squeezing.
+            content.BackColor = Palette.Window;
+            content.Bounds = new Rectangle(0, 0, 420, 672);
+            Ui.ScaleChildren(content);
+            content.Size = Ui.Sz(420, 672);
+            var full = Ui.Sz(420, 672);
+            var screen = Screen.FromPoint(Cursor.Position).WorkingArea;
+            int chrome = SystemInformation.CaptionHeight + 2 * SystemInformation.FixedFrameBorderSize.Height + 8;
+            if (full.Height + chrome > screen.Height)
+            {
+                full = new Size(full.Width + SystemInformation.VerticalScrollBarWidth, Math.Max(Ui.S(300), screen.Height - chrome));
+                content.AutoScroll = true;
+                content.AutoScrollMinSize = Ui.Sz(420, 672);
+            }
+            ClientSize = full;
+            content.Dock = DockStyle.Fill;
+            Controls.Add(content);
             ResumeLayout(false);
 
             c.Changed += RefreshView;
             RefreshView();
+        }
+
+        void ShowDetail()
+        {
+            var s = c.State;
+            var text = "状态：" + s.Message + "\r\n\r\nusque 的错误：\r\n" + (s.Detail ?? "（没有）") +
+                       "\r\n\r\n完整日志：" + System.IO.Path.Combine(c.DataDir, "usque.log") + "\r\n（这段文字已复制，可以直接粘贴发给别人）";
+            try { Clipboard.SetText(text); } catch { }
+            MessageBox.Show(this, text, "错误详情 - WARP 新开关", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         void ShowHint(string error)
@@ -202,7 +240,9 @@ namespace WarpSwitchNext
             link.AutoSize = true;
             link.Padding = new Padding(0, 3, 0, 3);
             var size = link.PreferredSize;
-            link.Location = new Point(align == ContentAlignment.MiddleRight ? bounds.Right - size.Width : bounds.Left, bounds.Top + (bounds.Height - size.Height) / 2);
+            // Laid out at 96 DPI like everything else (scaled later), so measure in 96-DPI units too.
+            int w = (int)Math.Ceiling(size.Width / Ui.Scale), h = (int)Math.Ceiling(size.Height / Ui.Scale);
+            link.Location = new Point(align == ContentAlignment.MiddleRight ? bounds.Right - w : bounds.Left, bounds.Top + (bounds.Height - h) / 2);
             link.LinkBehavior = LinkBehavior.HoverUnderline;
             link.LinkClicked += (s, e) => action();
         }
@@ -225,7 +265,8 @@ namespace WarpSwitchNext
             messageLabel.Text = s.Message;
             ipValue.Text = s.Ip;
             coloValue.Text = s.Colo;
-            proxyValue.Text = Ports.ProxyAddress;
+            routeValue.Text = s.Route;
+            detailLink.Visible = !string.IsNullOrEmpty(s.Detail) && (s.Phase == "error" || s.Phase == "reconnecting");
             // Never overwrite what the user is typing.
             if (!sniEdited && sniBox.Text != c.Settings.Sni) sniBox.Text = c.Settings.Sni;
 
@@ -237,7 +278,7 @@ namespace WarpSwitchNext
             else mainButton.SetAccent(Palette.Blue, Palette.BlueHover);
             mainButton.Enabled = !c.Stopping;
 
-            footer.Text = c.NeedsSetup ? "首次使用将向 Cloudflare 注册属于你自己的免费账号。" : "通过系统代理连接。服务器公钥校验保持开启。";
+            footer.Text = c.NeedsSetup ? "首次使用将向 Cloudflare 注册属于你自己的免费账号。" : "系统代理 " + Ports.ProxyAddress + " · 服务器公钥校验保持开启";
             termsLink.Visible = c.NeedsSetup;
         }
 
@@ -261,16 +302,15 @@ namespace WarpSwitchNext
         {
             c = controller; main = owner;
             SuspendLayout();
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleMode = AutoScaleMode.None;
             Text = "网络诊断 - WARP 新开关";
             Name = "DiagnosticsWindow";
             Icon = Ui.AppIcon();
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(620, 460);
-            MinimumSize = new Size(480, 320);
+            ClientSize = Ui.Sz(620, 460);
+            MinimumSize = Ui.Sz(480, 320);
             Font = Ui.Font(9f);
 
             output.Name = "DiagnosticsOutput";
@@ -278,24 +318,24 @@ namespace WarpSwitchNext
             output.WordWrap = true;
             output.Font = Ui.Mono(9.5f);
             output.BackColor = Color.White;
-            output.Bounds = new Rectangle(12, 12, 596, 388);
+            output.Bounds = Ui.R(12, 12, 596, 388);
             output.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
             useButton.Name = "UseSni";
-            useButton.Bounds = new Rectangle(12, 414, 220, 32);
+            useButton.Bounds = Ui.R(12, 414, 220, 32);
             useButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
             useButton.Visible = false;
             useButton.Click += (s, e) => { if (best != null) { main.UseSni(best); useButton.Enabled = false; useButton.Text = "已改用 " + best; } };
             againButton.Text = "重新诊断";
-            againButton.Bounds = new Rectangle(334, 414, 88, 32);
+            againButton.Bounds = Ui.R(334, 414, 88, 32);
             againButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             againButton.Click += (s, e) => Begin();
             copyButton.Text = "复制结果";
-            copyButton.Bounds = new Rectangle(426, 414, 88, 32);
+            copyButton.Bounds = Ui.R(426, 414, 88, 32);
             copyButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             copyButton.Click += (s, e) => { try { Clipboard.SetText(output.Text); } catch { } };
             closeButton.Text = "关闭";
-            closeButton.Bounds = new Rectangle(518, 414, 90, 32);
+            closeButton.Bounds = Ui.R(518, 414, 90, 32);
             closeButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
             closeButton.Click += (s, e) => Close();
             CancelButton = closeButton;

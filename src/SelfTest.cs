@@ -47,7 +47,13 @@ namespace WarpSwitchNext
             {
                 // The connection is started exactly like the reference project.
                 var args = Engine.UsqueArguments(@"C:\data\account.json", Ports.Socks, "www.cloudflare.com");
-                r.Check(args == "-c \"C:\\data\\account.json\" socks -b 127.0.0.1 -p 1080 --http2 -s www.cloudflare.com", "usque command: " + args);
+                r.Check(args == "-c \"C:\\data\\account.json\" socks -b 127.0.0.1 -p 1080 --http2 -s www.cloudflare.com --always-reconnect", "usque command (default entry): " + args);
+                args = Engine.UsqueArguments(@"C:\data\runtime.json", Ports.Socks, "dock.schoology.com", Ports.Relay);
+                r.Check(args.Contains("--http2 -P 18443 -s dock.schoology.com"), "usque command (backup entry through the relay): " + args);
+                var hello = new byte[5 + 300]; hello[0] = 22; hello[1] = 3; hello[2] = 1; hello[3] = 1; hello[4] = 44; hello[5] = 1;
+                var parts = ClientHello.Split(hello, hello.Length);
+                r.Check(parts.Count == 7 && parts.Sum(x => x.Length - 5) == 300 && parts.All(x => x[0] == 22), "ClientHello split into 7 TLS records with the same bytes");
+                r.Check(Route.Entries.Length == 8 && !Route.Entries.Contains(Route.DefaultEntry), "8 backup entries, as in the Mac app");
                 var config = new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject(Engine.SingBoxConfig()) as Dictionary<string, object>;
                 var inbound = ((object[])config["inbounds"])[0] as Dictionary<string, object>;
                 var outbound = ((object[])config["outbounds"])[0] as Dictionary<string, object>;
@@ -234,6 +240,19 @@ namespace WarpSwitchNext
                 int code = test.Run();
                 r.Check(code == 0 && reached != null && reached.Ip != "—", "usque --http2 -s www.cloudflare.com + sing-box reached WARP: exit IP " + reached?.Ip + ", node " + reached?.Colo);
 
+                // 1b. The Mac app's routes: a backup entry through the relay, with and without the ClientHello split.
+                foreach (var forced in new[] { new Route("162.159.198.4", true), new Route("162.159.199.3", false) })
+                {
+                    Json.Write(Path.Combine(dataDir, "last-route.json"), forced);
+                    var e = new Engine(dataDir, Paths.Usque, Paths.SingBox, "dock.schoology.com", testOnly: true);
+                    StateInfo got = null;
+                    e.StateChanged += s => { if (s.Phase == "on") got = s; };
+                    int rc = e.Run();
+                    r.Check(rc == 0 && got != null && got.Route == forced.Label, "connected through " + forced.Label + " (" + (got?.Route ?? "failed") + ", exit IP " + got?.Ip + ")");
+                }
+                Util.TryDelete(Path.Combine(dataDir, "last-route.json"));
+                r.Check(!File.Exists(Path.Combine(dataDir, "runtime.json")), "runtime config removed after closing");
+
                 // 2. As the app runs it: system proxy on, real traffic, change the 伪装域名 while connected, then off.
                 var before = WinInet.Query();
                 var engine = new Engine(dataDir, Paths.Usque, Paths.SingBox, "www.cloudflare.com", testOnly: false);
@@ -312,17 +331,46 @@ namespace WarpSwitchNext
                 r.Check(report.DirectOk, "direct HTTPS check works");
                 r.Check(report.MasqueTcpOk, "TCP 443 to the WARP entry is open");
                 r.Check(report.CloudflareSniOk, "TLS handshake with SNI www.cloudflare.com completes");
-                r.Check(report.Snis.Count == 1 + Defaults.SniCandidates.Length, "tested the current 伪装域名 and every candidate (" + report.Snis.Count + ")");
-                r.Check(report.Snis.Any(s => s.Sni == "www.cloudflare.com" && s.Works), "usque really connected with www.cloudflare.com");
+                r.Check(report.Snis.Count == 4 + 2 * Defaults.SniCandidates.Count(x => x != "dock.schoology.com"), "tested the current 伪装域名 on 4 routes and every candidate on 2 (" + report.Snis.Count + ")");
+                r.Check(report.Snis.Any(s => s.Works && s.Route.Fragment), "a backup entry with the ClientHello split works through the relay");
+                r.Check(report.Snis.Any(s => s.Sni == "www.cloudflare.com" && s.Works && s.Route.Endpoint == null), "usque really connected with www.cloudflare.com on the default entry");
                 r.Check(report.BestSni != null && report.Summary.Length > 0, "a working 伪装域名 is suggested: " + report.Summary);
                 r.Check(File.Exists(Path.Combine(dataDir, "diagnose.txt")), "diagnose.txt saved");
-                r.Check(!Directory.GetFiles(dataDir, "diagnose-usque-*.log").Any() && !Process.GetProcessesByName("usque").Any(), "temporary usque processes and logs cleaned up");
+                r.Check(!Directory.GetFiles(dataDir, "diagnose-*").Any() && !Process.GetProcessesByName("usque").Any(), "temporary usque processes and logs cleaned up");
             }
             catch (Exception e) { r.Check(false, "unexpected error: " + e); }
             return r.Done("网络诊断 checked the network and found a working 伪装域名 with real usque connections");
         }
 
         // ---------- Screenshots of the window in each state ----------
+
+        /// <summary>Text that does not fit its control, or controls on top of each other: what broke on a 250 % screen.</summary>
+        static IEnumerable<string> LayoutProblems(Form form)
+        {
+            var all = new List<Control>();
+            void Walk(Control p) { foreach (Control c in p.Controls) { if (c.Visible) { all.Add(c); if (!(c is TextBoxBase)) Walk(c); } } }
+            Walk(form);
+            foreach (var c in all)
+            {
+                if (c is Label label && !(c is LinkLabel) && !string.IsNullOrEmpty(label.Text) && !label.AutoEllipsis)
+                {
+                    var need = TextRenderer.MeasureText(label.Text, label.Font, new Size(label.Width, int.MaxValue), TextFormatFlags.WordBreak);
+                    if (need.Height > label.Height + 1 || need.Width > label.Width + 1)
+                        yield return "text does not fit in '" + label.Text + "': needs " + need.Width + "x" + need.Height + ", has " + label.Width + "x" + label.Height;
+                }
+                if (c is TextBox box && box.Height < box.Font.Height + 2)
+                    yield return "text box shorter than its text: " + box.Height + " < " + box.Font.Height;
+                if (c is Button button)
+                {
+                    var need = TextRenderer.MeasureText(button.Text, button.Font);
+                    if (need.Height > button.Height || need.Width > button.Width) yield return "button text does not fit: " + button.Text;
+                }
+            }
+            foreach (var a in all)
+                foreach (var b in all)
+                    if (a != b && a.Parent == b.Parent && string.CompareOrdinal(a.Name + a.GetHashCode(), b.Name + b.GetHashCode()) < 0 && a.Bounds.IntersectsWith(b.Bounds))
+                        yield return "controls overlap: '" + (a.Name.Length > 0 ? a.Name : a.Text) + "' and '" + (b.Name.Length > 0 ? b.Name : b.Text) + "'";
+        }
 
         public static int Screenshots(string folder, string outFile)
         {
@@ -348,9 +396,9 @@ namespace WarpSwitchNext
                     {
                         ("1-first-run", new StateInfo(), true, false, false),
                         ("2-registering", new StateInfo { Phase = "registering", Message = "正在创建你的独立免费 WARP 账号…" }, true, true, false),
-                        ("3-connecting", new StateInfo { Phase = "connecting", Message = "正在通过 HTTP/2 连接 WARP（伪装域名 www.cloudflare.com）…", Sni = "www.cloudflare.com" }, false, true, true),
-                        ("4-connected", new StateInfo { Phase = "on", Message = "已连接 · 浏览器和使用系统代理的程序都会经过 WARP", Sni = "www.cloudflare.com", Ip = "104.28.203.89", Colo = "IAD" }, false, true, true),
-                        ("5-error", new StateInfo { Phase = "error", Message = "用伪装域名 www.cloudflare.com 连不上 WARP。点「网络诊断」可以查出学校封了什么、换哪个域名能用。\n（usque：Failed to connect tunnel: connection reset）" }, false, false, true),
+                        ("3-connecting", new StateInfo { Phase = "connecting", Message = "正在尝试连接方式 3/17：备用入口 162.159.198.4 · 握手分片（伪装域名 dock.schoology.com）", Sni = "dock.schoology.com" }, false, true, true),
+                        ("4-connected", new StateInfo { Phase = "on", Message = "已连接 · 备用入口 162.159.198.4 · 握手分片", Sni = "dock.schoology.com", Ip = "2a09:bac5:9f23:2828::400:3d", Colo = "IAD", Route = "备用入口 162.159.198.4 · 握手分片" }, false, true, true),
+                        ("5-error", new StateInfo { Phase = "error", Message = "用伪装域名 dock.schoology.com 试遍了所有连接方式（默认入口、8 个备用入口、握手分片）都连不上。点「网络诊断」查原因，或换一个伪装域名。", Detail = "2026/11/19 13:10:07 EST Failed to connect tunnel: failed to dial connect-ip over HTTP/2: connect-ip: failed to send request: Connect \"https://162.159.198.2/\": read tcp 10.0.0.5:51234->162.159.198.2:443: wsarecv: An existing connection was forcibly closed by the remote host." }, false, false, true),
                         ("6-off", new StateInfo { Message = "已关闭，系统代理已恢复" }, false, false, false),
                     };
                     foreach (var scene in scenes)
@@ -363,8 +411,9 @@ namespace WarpSwitchNext
                             form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
                             var file = Path.Combine(folder, scene.name + ".png");
                             bmp.Save(file, ImageFormat.Png);
-                            r.Check(File.Exists(file), "saved " + file + " (" + form.Width + "x" + form.Height + ")");
+                            r.Check(File.Exists(file), "saved " + file + " (" + form.Width + "x" + form.Height + ", scale " + Ui.Scale + ")");
                         }
+                        foreach (var problem in LayoutProblems(form)) r.Check(false, scene.name + ": " + problem);
                     }
                     using (var tray = new Bitmap(4 * 40, 40))
                     using (var g = Graphics.FromImage(tray))

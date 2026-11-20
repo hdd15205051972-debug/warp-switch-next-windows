@@ -28,6 +28,7 @@ namespace WarpSwitchNext
         public sealed class SniResult
         {
             public string Sni;
+            public Route Route;
             public bool Works;
             public string Detail;
         }
@@ -39,6 +40,7 @@ namespace WarpSwitchNext
             public readonly StringBuilder Text = new StringBuilder();
             public string Summary = "";
             public string BestSni => Snis.FirstOrDefault(s => s.Works)?.Sni;
+            public bool DirectWorks => Snis.Any(s => s.Works && s.Route.Endpoint == null);
         }
 
         readonly string dir, usque, currentSni;
@@ -68,14 +70,14 @@ namespace WarpSwitchNext
                                 : "   不通：基础网络连不上 cloudflare.com");
 
             Say("2. 到 WARP 入口的 TCP 443");
-            var entries = new List<string> { MasqueIp, WireGuardIp };
+            var entries = new List<string> { MasqueIp, "162.159.198.3", "162.159.199.3", WireGuardIp };
             var accountEndpoint = AccountEndpoint();
             if (accountEndpoint != null && !entries.Contains(accountEndpoint)) entries.Insert(0, accountEndpoint);
             foreach (var ip in entries)
             {
                 bool ok = TcpOpen(ip, 443, 4000);
                 if (ip == MasqueIp || ip == accountEndpoint) report.MasqueTcpOk |= ok;
-                Say("   " + ip + ":443 " + (ok ? "通" : "不通（按 IP 封锁）") + (ip == accountEndpoint ? "  ← 你的账号用的入口" : ""));
+                Say("   " + ip + ":443 " + (ok ? "通" : "不通（按 IP 封锁）") + (ip == accountEndpoint ? "  ← 你的账号用的入口" : ip.StartsWith("162.159.19") && ip != MasqueIp ? "  ← 备用入口" : ""));
             }
 
             Say("3. SNI 测试（对 WARP 入口 " + MasqueIp + " 做 TLS 握手）");
@@ -91,7 +93,7 @@ namespace WarpSwitchNext
                 Say("   SNI=" + sni + (error == null ? "  握手成功" : reached ? "  服务器有回应（" + error + "），没被网络拦截" : "  握手失败/被重置（" + error + "）  ← 按 SNI 封锁"));
             }
 
-            Say("4. 用 usque 实际连接 WARP（HTTP/2，每个伪装域名单独测试，最多约 20 秒）");
+            Say("4. 用 usque 实际连接 WARP（HTTP/2；默认入口、备用入口、握手分片分别测试，每项最多约 20 秒）");
             var candidates = new List<string>();
             if (Util.ValidDomain(currentSni)) candidates.Add(currentSni);
             candidates.AddRange(Defaults.SniCandidates.Where(s => !candidates.Contains(s)));
@@ -99,18 +101,31 @@ namespace WarpSwitchNext
             else if (!Account.Valid(Path.Combine(dir, "account.json"))) Say("   跳过：还没有 WARP 账号，请先点「同意条款并注册」");
             else
             {
+                // The current 伪装域名 gets every kind of route; the other candidates the two most useful ones.
+                var tests = new List<Tuple<string, Route>>();
+                foreach (var r in new[] { Route.Direct, new Route("162.159.198.3", true), new Route("162.159.199.3", true), new Route("162.159.198.3", false) })
+                    tests.Add(Tuple.Create(candidates[0], r));
+                foreach (var sni in candidates.Skip(1))
+                {
+                    tests.Add(Tuple.Create(sni, Route.Direct));
+                    tests.Add(Tuple.Create(sni, new Route("162.159.198.3", true)));
+                }
                 var rng = new Random();
-                var tasks = candidates.Select((sni, i) =>
+                for (int start = 0; start < tests.Count; start += 4) // a few at a time
                 {
-                    int port = FreePort(20000 + rng.Next(0, 5000) + i * 7);
-                    return Task.Run(() => TestSni(sni, port));
-                }).ToArray();
-                Task.WaitAll(tasks);
-                foreach (var t in tasks)
-                {
-                    var r = t.Result;
-                    report.Snis.Add(r);
-                    Say("   " + (r.Works ? "✅ 可用  " : "❌ 失败  ") + r.Sni + (string.IsNullOrEmpty(r.Detail) ? "" : "  " + r.Detail));
+                    var batch = tests.Skip(start).Take(4).Select((t, i) =>
+                    {
+                        int port = FreePort(20000 + rng.Next(0, 4000) + i * 11);
+                        int relayPort = FreePort(port + 1);
+                        return Task.Run(() => TestRoute(t.Item1, t.Item2, port, relayPort));
+                    }).ToArray();
+                    Task.WaitAll(batch);
+                    foreach (var t in batch)
+                    {
+                        var r = t.Result;
+                        report.Snis.Add(r);
+                        Say("   " + (r.Works ? "✅ 可用  " : "❌ 失败  ") + r.Sni + "  [" + r.Route.Label + "]" + (string.IsNullOrEmpty(r.Detail) ? "" : "  " + r.Detail));
+                    }
                 }
             }
 
@@ -126,6 +141,12 @@ namespace WarpSwitchNext
             var best = report.BestSni;
             if (!report.DirectOk)
                 return "这台电脑现在连普通网站都打不开。先确认已连上 Wi-Fi，并在浏览器里完成校园网登录（认证页面），再重新诊断。";
+            if (best != null && !report.DirectWorks)
+            {
+                var ok = report.Snis.First(x => x.Works);
+                return "这个网络拦了默认入口的连接，但用 " + ok.Route.Label + "、伪装域名 " + ok.Sni + " 能连上 WARP。点「开启」，程序会自动按这种方式连接" +
+                       (ok.Sni != currentSni ? "（先点「使用 " + ok.Sni + "」换上这个伪装域名）" : "") + "。";
+            }
             if (best != null)
             {
                 var also = string.Join("、", report.Snis.Where(s => s.Works && s.Sni != best).Select(s => s.Sni));
@@ -281,15 +302,19 @@ namespace WarpSwitchNext
         }
 
         /// <summary>test-sni.sh: a temporary usque with this SNI, then a trace through it (socks5h).</summary>
-        SniResult TestSni(string sni, int port)
+        SniResult TestRoute(string sni, Route route, int port, int relayPort)
         {
-            var result = new SniResult { Sni = sni };
+            var result = new SniResult { Sni = sni, Route = route };
             var logPath = Path.Combine(dir, "diagnose-usque-" + port + ".log");
+            var runtimePath = Path.Combine(dir, "diagnose-runtime-" + port + ".json");
             var log = new LogFile(logPath, truncate: true);
             Process p = null;
+            HelloRelay relay = null;
             try
             {
-                p = Engine.Launch(usque, Engine.UsqueArguments(Path.Combine(dir, "account.json"), port, sni), dir, log);
+                if (route.Endpoint != null) { relay = new HelloRelay(route.Endpoint, route.Fragment, relayPort); relay.Start(); }
+                var config = Engine.RouteConfig(Path.Combine(dir, "account.json"), runtimePath, route);
+                p = Engine.Launch(usque, Engine.UsqueArguments(config, port, sni, route.Endpoint != null ? relayPort : 0), dir, log);
                 var until = DateTime.UtcNow.AddSeconds(20);
                 while (DateTime.UtcNow < until)
                 {
@@ -305,6 +330,7 @@ namespace WarpSwitchNext
                     if (exited) break;
                 }
                 var why = Engine.LastUsqueError(logPath);
+                if (why != null && why.Length > 160) why = why.Substring(0, 160) + "…";
                 result.Detail = why ?? "20 秒内没有连上";
                 return result;
             }
@@ -313,8 +339,10 @@ namespace WarpSwitchNext
             {
                 try { if (p != null && !p.HasExited) { p.Kill(); p.WaitForExit(3000); } } catch { }
                 try { p?.Dispose(); } catch { }
+                try { relay?.Stop(); } catch { }
                 Thread.Sleep(200);
                 Util.TryDelete(logPath);
+                Util.TryDelete(runtimePath);
             }
         }
 

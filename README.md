@@ -10,6 +10,7 @@
 
 - `usque -c account.json socks -b 127.0.0.1 -p 1080 --http2 -s <伪装域名>`：走 TCP 443 的 HTTP/2，TLS 握手里显示伪装域名，而不是会被封的 `consumer-masque.cloudflareclient.com`。
 - `sing-box`：在 `127.0.0.1:7890` 提供 HTTP + SOCKS5 代理，转发给 usque，内网地址直连。
+- 默认入口连不上时，自动改用 Mac 版在学校网络上验证过的方式：通过本机 `127.0.0.1:18443` 的转发连到 8 个备用入口之一（`162.159.198.3`–`.8`、`162.159.199.3`、`.4`），可选把 TLS ClientHello 拆成多个小记录（握手分片）。连上的方式会被记住。
 - 程序把 Windows 系统代理指向 `127.0.0.1:7890`，关闭时原样恢复。
 
 **适用于 64 位 Windows 10（1803 或更新）和 Windows 11**（ARM 电脑通过系统自带的 x64 兼容运行）。使用 Windows 自带的 .NET Framework，无需另装运行库。此项目为非官方客户端，与 Cloudflare 无隶属关系。
@@ -18,7 +19,7 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 
 ## 下载和安装
 
-从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-2.0.0.zip`。
+从 **[Releases 下载最新版](https://github.com/hdd15205051972-debug/warp-switch-next-windows/releases/latest)** 中下载 `WARP-Switch-Next-Windows-2.1.0.zip`。
 
 1. 解压，把「WARP 新开关」文件夹放到一个固定的位置（例如「文档」或 `D:\Apps`）。`core` 文件夹必须和 exe 放在一起。
 2. 双击 `WARP 新开关.exe`。程序没有代码签名，Windows 可能提示「Windows 已保护你的电脑」：点「更多信息」→「仍要运行」。
@@ -29,9 +30,9 @@ macOS 版是另一个独立项目：[warp-switch-next](https://github.com/hdd152
 
 ## 日常使用
 
-- **开启 / 关闭**：先确认流量真的经过 WARP（`warp=on`）才启用系统代理；关闭时恢复原来的代理设置。
+- **开启 / 关闭**：依次尝试默认入口、备用入口、握手分片，直到流量真的经过 WARP（`warp=on`）才启用系统代理；关闭时恢复原来的代理设置。用的是哪种方式显示在「连接方式」一栏。
 - **伪装域名**：窗口中间的输入框，默认 `www.cloudflare.com`。改完点「应用」或按回车，**任何时候都能改**；连接中应用只会重启 usque，系统代理不断开。中文输入法打出的「。」和全角字母会自动纠正，粘贴整个网址会只取域名。
-- **网络诊断**：在学校网络上连不上时点它。会依次检查：普通 HTTPS、到 WARP 入口 `162.159.198.2` / `162.159.192.1` 的 TCP 443、用默认域名和伪装域名对入口做 TLS 握手，最后用 usque 对当前伪装域名和 `www.cloudflare.com`、`cloudflareaccess.com`、`www.bing.com` 逐个真实连接。最后给出中文结论，找到能用的域名时可以一键换上。结果保存在 `diagnose.txt`，可以复制发给别人。
+- **网络诊断**：在学校网络上连不上时点它。会依次检查：普通 HTTPS、到 WARP 入口 `162.159.198.2` / `162.159.192.1` 的 TCP 443、用默认域名和伪装域名对入口做 TLS 握手，最后用 usque 真实连接：当前伪装域名分别走默认入口、备用入口（拆分 / 不拆分握手），`www.cloudflare.com`、`cloudflareaccess.com`、`www.bing.com` 各走默认入口和备用入口。最后给出中文结论，找到能用的域名时可以一键换上。结果保存在 `diagnose.txt`，可以复制发给别人。
 - **开机时自动连接**：登录 Windows 时程序在通知区域后台启动并自动连接；睡眠唤醒、网络恢复后自动重连。手动点「关闭」后不会自动重连。
 - **通知区域图标**：猫猫图标右下角的小圆点表示状态（灰色已关闭、蓝色连接中、绿色已连接、橙色未连上）。关掉窗口后程序仍在后台运行；「退出」会先关闭连接并恢复代理。
 - **打开日志**：数据文件夹里的 `usque.log`（隧道）、`sing-box.log`（本机代理）、`worker.log`（程序）。

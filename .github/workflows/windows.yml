@@ -50,7 +50,17 @@ jobs:
           $exe = Resolve-Path 'dist/WARP 新开关/WARP 新开关.exe'
           $p = Start-Process -FilePath $exe -ArgumentList '--screenshots', "$PWD\screenshots", '--out', "$PWD\screenshots.txt" -Wait -PassThru
           Get-Content screenshots.txt
-          exit $p.ExitCode
+          $code = $p.ExitCode
+          # The same window at the display scaling of a high-resolution laptop (175 %, 250 %).
+          foreach ($scale in '1.75', '2.5') {
+            $env:WARPSWITCH_UI_SCALE = $scale
+            $name = 'scale-' + $scale.Replace('.', '')
+            $p = Start-Process -FilePath $exe -ArgumentList '--screenshots', "$PWD\screenshots\$name", '--out', "$PWD\$name.txt" -Wait -PassThru
+            Get-Content "$name.txt"
+            if ($p.ExitCode -ne 0) { $code = $p.ExitCode }
+          }
+          Remove-Item Env:WARPSWITCH_UI_SCALE
+          exit $code
 
       - name: Real WARP connection test
         id: connect
@@ -115,6 +125,7 @@ jobs:
             selftest.txt
             proxytest.txt
             diagnosetest.txt
+            scale-*.txt
             uitest.txt
             screenshots.txt
             connecttest.txt

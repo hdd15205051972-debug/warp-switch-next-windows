@@ -32,6 +32,45 @@ namespace WarpSwitchNext
     static class Ui
     {
         static readonly Dictionary<string, Font> cache = new Dictionary<string, Font>();
+        static float scale;
+        static float fontBoost = 1;
+
+        /// <summary>
+        /// How much larger than 96 DPI the window is drawn (1.5 at 150 %, 2.5 at 250 %). Layout is
+        /// designed at 96 DPI and every position and size is multiplied by this; fonts are in points
+        /// and grow by themselves. WARPSWITCH_UI_SCALE simulates another scale for the build's tests.
+        /// </summary>
+        public static float Scale
+        {
+            get
+            {
+                if (scale > 0) return scale;
+                float real = 1;
+                try { using (var g = Graphics.FromHwnd(IntPtr.Zero)) real = g.DpiX / 96f; } catch { }
+                float simulated = 0;
+                float.TryParse(Environment.GetEnvironmentVariable("WARPSWITCH_UI_SCALE"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out simulated);
+                if (simulated > 0) { fontBoost = simulated / real; scale = simulated; }
+                else scale = real < 0.5f ? 1 : real;
+                return scale;
+            }
+        }
+
+        public static int S(int value) => (int)Math.Round(value * Scale);
+        /// <summary>Scales the corners, so rectangles that touch at 96 DPI still touch (and don't overlap) after rounding.</summary>
+        public static Rectangle R(int x, int y, int w, int h) => Rectangle.FromLTRB(S(x), S(y), S(x + w), S(y + h));
+        public static Size Sz(int w, int h) => new Size(S(w), S(h));
+
+        /// <summary>Scales controls laid out at 96 DPI, and everything inside them.</summary>
+        public static void ScaleChildren(Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                var b = c.Bounds;
+                if (c.AutoSize) c.Location = new Point(S(b.X), S(b.Y));
+                else c.Bounds = R(b.X, b.Y, b.Width, b.Height);
+                if (!(c is TextBoxBase)) ScaleChildren(c);
+            }
+        }
 
         public static Font Font(float size, FontStyle style = FontStyle.Regular) => Get("Microsoft YaHei UI", size, style);
         public static Font Mono(float size) => Get("Consolas", size, FontStyle.Regular);
@@ -40,6 +79,8 @@ namespace WarpSwitchNext
         {
             var key = family + size + style;
             if (cache.TryGetValue(key, out var f)) return f;
+            _ = Scale;
+            size *= fontBoost;
             try
             {
                 f = new Font(family, size, style, GraphicsUnit.Point);
